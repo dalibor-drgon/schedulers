@@ -2,6 +2,8 @@
 #include "scheduler.h"
 #include <stddef.h>
 
+#include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/rcc.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/scb.h>
 
@@ -72,6 +74,7 @@ static void list_bubbleup(sched_list *list, sched_task *task,
     }
 }
 
+#if 0
 static void list_bubbledown(sched_list *list, sched_task *task, 
         bool (*is_lower)(sched_task *one, sched_task *two)) 
 {
@@ -81,14 +84,15 @@ static void list_bubbledown(sched_list *list, sched_task *task,
     list_append(list, task);
     list_bubbleup(list, task, is_lower);
 }
+#endif
 
 
 /**************************** Queue functions *********************************/
 
 static sched_task *queue_dequeue(sched_queue *queue) {
-    int irq = sched_irq_disable();
+    uint32_t primask = sched_irq_disable();
     if(queue->first == NULL) {
-        if(!irq) sched_irq_enable();
+        sched_irq_restore(primask);
         return NULL;
     }
     sched_task *task = queue->first;
@@ -99,12 +103,12 @@ static sched_task *queue_dequeue(sched_queue *queue) {
     }
     task->fired_next = NULL;
 
-    if(!irq) sched_irq_enable();
+    sched_irq_restore(primask);
     return task;
 }
 
 static void queue_enqueue(sched_queue *queue, sched_task *task) {
-    int irq = sched_irq_disable();
+    uint32_t primask = sched_irq_disable();
     if(queue->first == NULL /* && queue->last == NULL */) {
         queue->first = queue->last = task;
     } else {
@@ -112,7 +116,7 @@ static void queue_enqueue(sched_queue *queue, sched_task *task) {
         prev->fired_next = task;
         queue->last = task;
     }
-    if(!irq) sched_irq_enable();
+    sched_irq_restore(primask);
 }
 
 
@@ -159,12 +163,110 @@ static bool list_nm_islower(sched_task *one, sched_task *two) {
 }
 #endif
 
+/**************************** Utilities ***************************************/
+
+// uint32_t sched_irq_disable() {
+//     uint32_t primask;
+//     __asm__ volatile ("MRS %0, primask\n\t"
+//                       "CPSID i" : "=r" (primask) );
+//     return primask;
+// }
+
+// void sched_irq_restore(uint32_t primask) {
+//     __asm__ volatile("MSR primask, %0" :: "r" (primask));
+// }
+
+// uint32_t sched_xchg(uint32_t *ptr, uint32_t val) {
+//     // Could be done with XCHG-like instruction, but not on Cortex M3
+//     uint32_t primask = sched_irq_disable();
+//     uint32_t cur = *ptr;
+//     *ptr = val;
+//     sched_irq_restore(primask);
+//     return cur;
+// }
+
+uint32_t sched_ticks() {
+  uint16_t cnt_lo;
+  uint16_t cnt_hi;
+  do {
+    cnt_hi = TIM_CNT(SCHED_TIMhi);
+    cnt_lo = TIM_CNT(SCHED_TIMlo);
+  } while(cnt_lo != TIM_CNT(SCHED_TIMlo) || cnt_hi != TIM_CNT(SCHED_TIMhi));
+  return ((uint32_t) cnt_hi << 16) | cnt_lo;
+}
+
+static void rcc_periph_clock_enable_tim(uint32_t TIM) {
+    if(TIM == TIM1) {
+        rcc_periph_clock_enable(RCC_TIM1);
+    } else if(TIM == TIM2) {
+        rcc_periph_clock_enable(RCC_TIM2);
+    } else if(TIM == TIM3) {
+        rcc_periph_clock_enable(RCC_TIM3);
+    } else if(TIM == TIM4) {
+        rcc_periph_clock_enable(RCC_TIM4);
+    }
+}
+
+static void nvic_enable_irq_tim(uint32_t TIM) {
+    const uint8_t priority = 0;
+    if(TIM == TIM1) {
+        nvic_enable_irq(NVIC_TIM1_CC_IRQ);
+        nvic_set_priority(NVIC_TIM1_CC_IRQ, priority);
+    } else if(TIM == TIM2) {
+        nvic_enable_irq(NVIC_TIM2_IRQ);
+        nvic_set_priority(NVIC_TIM2_IRQ, priority);
+    } else if(TIM == TIM3) {
+        nvic_enable_irq(NVIC_TIM3_IRQ);
+        nvic_set_priority(NVIC_TIM3_IRQ, priority);
+    } else if(TIM == TIM4) {
+        nvic_enable_irq(NVIC_TIM4_IRQ);
+        nvic_set_priority(NVIC_TIM4_IRQ, priority);
+    }
+}
+
 /**************************** Scheduler functions *****************************/
 
+
 void sched_init() {
+    /** Init scheduler **/
     scheduler.realtime_tasks.first = scheduler.realtime_tasks.last = NULL;
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
     scheduler.cur_task = &scheduler.main_task;
+
+    /** Init timer **/
+
+    // Enable RCC clock for these timers
+	rcc_periph_clock_enable_tim(SCHED_TIMlo);
+	rcc_periph_clock_enable_tim(SCHED_TIMhi);
+
+    // Setup prescaler
+    timer_set_prescaler(SCHED_TIMlo, SCHED_CPU_MHZ-1);
+
+    // Setup TIM2 as Master-mode timer, TIM3 as slave-mode timer
+    TIM_CR2(SCHED_TIMlo) |= TIM_CR2_MMS_UPDATE;
+    switch(SCHED_ITR) {
+        default:
+        case 0:
+            TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_TS_ITR0; 
+            break;
+        case 1:
+            TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_TS_ITR1;
+            break;
+        case 2:
+            TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_TS_ITR2; 
+            break;
+        case 3:
+            TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_TS_ITR3; 
+            break;
+    }
+    TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_SMS_ECM1;
+
+    // Finally enable those timers
+    timer_enable_counter(SCHED_TIMhi);
+    timer_enable_counter(SCHED_TIMlo);
+
+    nvic_enable_irq_tim(SCHED_TIMhi);
+    nvic_enable_irq_tim(SCHED_TIMlo);
 }
 
 void sched_start() {
@@ -182,35 +284,104 @@ int __attribute__((noinline)) sched_syscall(
 	__asm__("nop");
 	__asm__("nop");
     (void) syscall_function, (void) data;
-    // Return value will be set by given syscall, do not worry about the
-    // warning. Tested with gcc, may require modification with other compilers.
+    
+}// Return value will be set by given syscall, do not worry about the warning. 
+// Tested with gcc, may require modification with other compilers.
+
+/**************************** Static scheduler functions **********************/
+
+static inline void sched_setup_hi(uint16_t goal) {
+    // Disable TIMlo.CC1 interrupt
+    TIM_DIER(SCHED_TIMlo) &= ~TIM_DIER_CC1IE;
+
+    // Set goal for hi timer
+    TIM_CCR1(SCHED_TIMhi) = goal;
+    // Clear CC1 interrupt flag
+    TIM_SR(SCHED_TIMhi) &= ~TIM_SR_CC1IF;
+    // Enable TIMhi.CC1 interrupt
+    TIM_DIER(SCHED_TIMhi) |= TIM_DIER_CC1IE;
+}
+
+static inline void sched_setup_lo(uint16_t goal) {
+    // Disable TIMhi.CC1 interrupt
+    TIM_DIER(SCHED_TIMhi) &= ~TIM_DIER_CC1IE;
+
+    // Set goal for lo timer
+    TIM_CCR1(SCHED_TIMlo) = goal;
+    // Clear CC1 interrupt flag
+    TIM_SR(SCHED_TIMlo) &= ~TIM_SR_CC1IF;
+    // Enable TIMhi.CC1 interrupt
+    TIM_DIER(SCHED_TIMlo) |= TIM_DIER_CC1IE;
+}
+
+void debug(char *c, uint32_t i);
+
+static bool sched_setup(uint32_t goal_time) {
+    int32_t time, rem;
+    uint32_t primask = sched_irq_disable();
+    do {
+        time = sched_ticks();
+        rem = goal_time - time;
+    } while((rem > 0xffff && rem <= 0x10002)
+         || (rem > 0      && rem <= 2));
+    if(rem <= 0) {
+        sched_irq_restore(primask);
+        return true;
+    }
+    if(rem > 0xffff) {
+        // setup high timer
+        sched_setup_hi(goal_time >> 16);
+    } else {
+        // debug("setup", rem);
+        // setup low timer
+        sched_setup_lo(goal_time & 0xffff);
+    }
+    sched_irq_restore(primask);
+    return false;
+}
+
+static void sched_unsetup() {
+    // Disable TIMlo.CC1 interrupt
+    TIM_DIER(SCHED_TIMlo) &= ~TIM_DIER_CC1IE;
+    // Disable TIMhi.CC1 interrupt
+    TIM_DIER(SCHED_TIMhi) &= ~TIM_DIER_CC1IE;
 }
 
 static bool sched_nexttask() {
-    // Add fired tasks from queue into realtime_tasks_waiting list
-    sched_task *task;
     do {
-        // Dequeue task
-        task = queue_dequeue(&scheduler.fired_tasks);
-        if(task == NULL) break;
-        list_append(&scheduler.realtime_tasks_waiting, task);
-        list_bubbleup(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
-    } while(true);
+        // Add fired tasks from queue into realtime_tasks_waiting list
+        sched_task *task;
+        do {
+            // Dequeue task
+            task = queue_dequeue(&scheduler.fired_tasks);
+            if(task == NULL) break;
+            list_append(&scheduler.realtime_tasks_waiting, task);
+            list_bubbleup(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
+        } while(true);
 
-    // Move no-longer-waiting tasks into task pending list `realtime_tasks`
-    uint32_t ticks = sched_ticks();
-    do {
-        // If there are no waiting tasks, break
-        task = scheduler.realtime_tasks_waiting.first;
-        if(task == NULL) break;
+        // Move no-longer-waiting tasks into task pending list `realtime_tasks`
+        uint32_t ticks = sched_ticks();
+        do {
+            // If there are no waiting tasks, break
+            task = scheduler.realtime_tasks_waiting.first;
+            if(task == NULL) break;
 
-        // If current task is still waiting, break
-        int32_t rem_ticks = task->data.realtime.next_execution - ticks;
-        if(rem_ticks > 0) break; 
+            // If current task is still waiting, break
+            int32_t rem_ticks = task->data.realtime.next_execution - ticks;
+            if(rem_ticks > 0) break; 
 
-        list_unlink(&scheduler.realtime_tasks_waiting, task);
-        list_append(&scheduler.realtime_tasks, task);
-        list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+            list_unlink(&scheduler.realtime_tasks_waiting, task);
+            list_append(&scheduler.realtime_tasks, task);
+            list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+        } while(true);
+
+        if(scheduler.realtime_tasks_waiting.first == NULL) {
+            sched_unsetup();
+            break;
+        } else {
+            if(!sched_setup(scheduler.realtime_tasks_waiting.first->data.realtime.next_execution))
+                break;
+        }
     } while(true);
 
     if(scheduler.realtime_tasks.first == NULL) return false;
@@ -230,6 +401,17 @@ static void sched_restoretask() {
         list_append(&scheduler.realtime_tasks, scheduler.cur_task);
         list_bubbleup(&scheduler.realtime_tasks, scheduler.cur_task, list_rt_islower);
     // }
+}
+
+
+static void sched_ontimhi() {
+    debug("hi", 1);
+    while(sched_nexttask() == false);
+}
+
+static void sched_ontimlo() {
+    debug("lo", 0);
+    while(sched_nexttask() == false);
 }
 
 /**************************** Task privileged functions ***********************/
@@ -313,6 +495,101 @@ void sched_task_fire(sched_task *task, int return_value) {
     queue_enqueue(&scheduler.fired_tasks, task);
 }
 
+/**************************** Timer handlers **********************************/
+
+void __attribute__((__naked__)) SCHED_TIMlo_IRQHandler() {
+    const uint32_t RETURN_ON_PSP = 0xfffffffd;
+
+	/* 0. NVIC has already pushed some registers on the program/main stack.
+	 * We are free to modify R0..R3 and R12 without saving them again, and
+	 * additionally the compiler may choose to use R4..R11 in this function.
+	 * If it does so, the naked attribute will prevent it from saving those
+	 * registers on the stack, so we'll just have to hope that it doesn't do
+	 * anything with them before our stm or after our ldm instructions.
+	 * Luckily, we don't ever intend to return to the original caller on the
+	 * main stack, so this question is moot. */
+
+    do {
+        /* 1. Push all other registers (R4..R11) on the program stack */
+        void *psp;
+        __asm__(
+            /* Load PSP to a temporary register */
+            "MRS %0, psp\n"
+            /* Push context relative to the address in the temporary
+                * register, update register with resulting address */
+            "STMDB %0!, {r4-r11}\n"
+            /* Put back the new stack pointer in PSP (pointless) */
+            "MSR psp, %0\n"
+            : "=r" (psp));
+
+        /* 2. Store that PSP in the current TCB */
+        scheduler.cur_task->sp = psp;
+    } while(0);
+    
+	/* 3. Handle the interrupt. Internvally it will call context switch
+	   function, which changes current TCB */ 
+    sched_ontimlo();
+
+	/* 4. Load PSP from TCB */
+	/* 5. Pop R4..R11 from the program stack */
+	void *psp = scheduler.cur_task->sp;
+	__asm__(
+		"LDMIA %0!, {r4-r11}\n"
+		"MSR psp, %0\n"
+		:: "r" (psp));
+
+    // Finally, return. NVIC will pop registers from stack we set up and jump
+    // where PC points to.
+	__asm__("bx %0" :: "r"(RETURN_ON_PSP));
+
+}
+
+void __attribute__((__naked__)) SCHED_TIMhi_IRQHandler() {
+    const uint32_t RETURN_ON_PSP = 0xfffffffd;
+
+	/* 0. NVIC has already pushed some registers on the program/main stack.
+	 * We are free to modify R0..R3 and R12 without saving them again, and
+	 * additionally the compiler may choose to use R4..R11 in this function.
+	 * If it does so, the naked attribute will prevent it from saving those
+	 * registers on the stack, so we'll just have to hope that it doesn't do
+	 * anything with them before our stm or after our ldm instructions.
+	 * Luckily, we don't ever intend to return to the original caller on the
+	 * main stack, so this question is moot. */
+
+    do {
+        /* 1. Push all other registers (R4..R11) on the program stack */
+        void *psp;
+        __asm__(
+            /* Load PSP to a temporary register */
+            "MRS %0, psp\n"
+            /* Push context relative to the address in the temporary
+                * register, update register with resulting address */
+            "STMDB %0!, {r4-r11}\n"
+            /* Put back the new stack pointer in PSP (pointless) */
+            "MSR psp, %0\n"
+            : "=r" (psp));
+
+        /* 2. Store that PSP in the current TCB */
+        scheduler.cur_task->sp = psp;
+    } while(0);
+    
+	/* 3. Handle the interrupt. Internvally it will call context switch
+	   function, which changes current TCB */ 
+    sched_ontimhi();
+
+	/* 4. Load PSP from TCB */
+	/* 5. Pop R4..R11 from the program stack */
+	void *psp = scheduler.cur_task->sp;
+	__asm__(
+		"LDMIA %0!, {r4-r11}\n"
+		"MSR psp, %0\n"
+		:: "r" (psp));
+
+    // Finally, return. NVIC will pop registers from stack we set up and jump
+    // where PC points to.
+	__asm__("bx %0" :: "r"(RETURN_ON_PSP));
+
+}
 
 /**************************** PendSV handler **********************************/
 
@@ -365,12 +642,14 @@ void __attribute__((__naked__)) PendSV_Handler() {
 			"STMDB SP!, {r4-r11}\n\t"
             "MOV %0, SP" 
             : "=r" (sp));
+
+		/* 2. Store that PSP in the current TCB */
 		scheduler.cur_task->sp = sp;
 	}
 
 	/* 3. Call context switch function, changes current TCB */
-    register sched_syscall_function syscall_func asm ("r0");
-    register void * data asm ("r1");
+    register sched_syscall_function syscall_func __asm__ ("r0");
+    register void * data __asm__ ("r1");
     if(syscall_func != NULL) {
         scheduler.cur_task->state = SCHEDSTATE_BLOCKING;
         sched_movetask();
@@ -379,8 +658,6 @@ void __attribute__((__naked__)) PendSV_Handler() {
         } else {
             sched_restoretask();
         }
-        //     sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
-        //     stack->r0 = ret;
     } else {
         while(sched_nexttask() == false);
     }
@@ -390,12 +667,11 @@ void __attribute__((__naked__)) PendSV_Handler() {
 	/* 5. Pop R4..R11 from the program stack */
 	void *psp = scheduler.cur_task->sp;
 	__asm__(
-		/* Pop context relative temporary register, update register */
 		"LDMIA %0!, {r4-r11}\n"
-		/* Put back the stack pointer in PSP */
 		"MSR psp, %0\n"
-		: : "r" (psp));
+		:: "r" (psp));
 
-	/* 6. Return. NVIC will pop registers and find the PC to use there. */
-	__asm__("bx %0" : : "r"(RETURN_ON_PSP));
+    // Finally, return. NVIC will pop registers from stack we set up and jump
+    // where PC points to.
+	__asm__("bx %0" :: "r"(RETURN_ON_PSP));
 }
