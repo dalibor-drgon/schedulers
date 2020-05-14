@@ -270,14 +270,15 @@ int __attribute__((noinline)) sched_syscall(
 {
 	/* Trigger PendSV, causing pend_sv_handler to be called immediately */
 	SCB_ICSR |= SCB_ICSR_PENDSVSET;
-	__asm__("nop");
-	__asm__("nop");
-	__asm__("nop");
-	__asm__("nop");
+	__asm__ volatile("nop");
+	__asm__ volatile("nop");
+	__asm__ volatile("nop");
+	__asm__ volatile("nop");
     (void) syscall_function, (void) data;
     
 }// Return value will be set by given syscall, do not worry about the warning. 
 // Tested with gcc, may require modification with other compilers.
+
 
 /**************************** Static scheduler functions **********************/
 
