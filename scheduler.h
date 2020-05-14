@@ -184,6 +184,8 @@ void sched_task_init(sched_task *task,
 void sched_task_add(sched_task *task,
         uint32_t next_execution, uint32_t interval);
 
+void sched_task_enqueue(sched_task *task);
+
 void sched_task_fire(sched_task *task, int return_value);
 
 /**
