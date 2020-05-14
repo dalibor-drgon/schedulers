@@ -167,6 +167,7 @@ void sched_init() {
     scheduler.realtime_tasks.first = scheduler.realtime_tasks.last = NULL;
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
     scheduler.cur_task = &scheduler.main_task;
+    nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
 }
 
 void sched_start() {
