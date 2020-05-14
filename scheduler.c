@@ -15,6 +15,8 @@ static void list_unlink(sched_list *list, sched_task *task) {
     if(list->first == task && list->last == task) {
         list->first = NULL;
         list->last = NULL;
+        sched_expect(task->sched_prev == NULL);
+        sched_expect(task->sched_next == NULL);
     } else {
         sched_task *prev = task->sched_prev;
         sched_task *next = task->sched_next;
@@ -27,6 +29,8 @@ static void list_unlink(sched_list *list, sched_task *task) {
 } 
 
 static void list_append(sched_list *list, sched_task *task) {
+    sched_expect(task->sched_prev == NULL);
+    sched_expect(task->sched_next == NULL);
     if(list->first == NULL /* && list->last == NULL */) {
         list->first = list->last = task;
     } else {
@@ -45,6 +49,9 @@ static void list_append(sched_list *list, sched_task *task) {
  * @param prev (n-1)th task in given list
  */
 static void list_exchange(sched_list *list, sched_task *cur, sched_task *prev) {
+    sched_expect(cur->sched_prev == prev);
+    sched_expect(prev->sched_next == cur);
+
     if(list->first == prev) {
         list->first = cur;
         cur->sched_prev = NULL;

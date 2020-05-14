@@ -154,6 +154,16 @@ uint32_t sched_ticks();
 
 uint32_t sched_xchg(uint32_t *ptr, uint32_t val);
 
+#ifdef DEBUG
+#define sched_expect(expression) do {                                          \
+    if((expression) == false) sched_expect_fail(__FILE__, __LINE__);           \
+} while(0)
+
+extern void sched_expect_fail(char *file, int lineno);
+#else
+#define sched_expect(expression)
+#endif
+
 /**************************** Scheduler ***************************************/
 
 void sched_init();
