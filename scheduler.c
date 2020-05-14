@@ -174,25 +174,6 @@ static bool list_nm_islower(sched_task *one, sched_task *two) {
 
 /**************************** Utilities ***************************************/
 
-// uint32_t sched_irq_disable() {
-//     uint32_t primask;
-//     __asm__ volatile ("MRS %0, primask\n\t"
-//                       "CPSID i" : "=r" (primask) );
-//     return primask;
-// }
-
-// void sched_irq_restore(uint32_t primask) {
-//     __asm__ volatile("MSR primask, %0" :: "r" (primask));
-// }
-
-// uint32_t sched_xchg(uint32_t *ptr, uint32_t val) {
-//     // Could be done with XCHG-like instruction, but not on Cortex M3
-//     uint32_t primask = sched_irq_disable();
-//     uint32_t cur = *ptr;
-//     *ptr = val;
-//     sched_irq_restore(primask);
-//     return cur;
-// }
 
 uint32_t sched_ticks() {
   uint16_t cnt_lo;
