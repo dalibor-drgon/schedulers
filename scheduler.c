@@ -160,18 +160,6 @@ static bool list_rtw_islower(sched_task *one, sched_task *two) {
 }
 
 
-#if 0
-static bool list_nm_islower(sched_task *one, sched_task *two) {
-    if(one->state == SCHEDSTATE_READY && two->state != SCHEDSTATE_READY) {
-        return true;
-    }
-    if(one->state != SCHEDSTATE_READY && two->state == SCHEDSTATE_READY) {
-        return false;
-    }
-    return one->priority > two->priority;
-}
-#endif
-
 /**************************** Utilities ***************************************/
 
 
