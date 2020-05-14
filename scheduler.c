@@ -302,17 +302,21 @@ void sched_task_add(sched_task *task,
     // list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
 }
 
-void sched_task_fire(sched_task *task, int return_value) {
+void sched_task_enqueue(sched_task *task) {
     // Set state to READY
     task->state = SCHEDSTATE_READY;
-    
-    // Set return value
-    sched_stack *stack = (sched_stack *) task->sp;
-    stack->r0 = return_value;
 
     // Finally enqueue it into fired tasks queue to be processed from PendSV
     // handler 
     queue_enqueue(&scheduler.fired_tasks, task);
+}
+
+void sched_task_fire(sched_task *task, int return_value) {
+    // Set return value
+    sched_stack *stack = (sched_stack *) task->sp;
+    stack->r0 = return_value;
+
+    sched_task_enqueue(task);
 }
 
 
