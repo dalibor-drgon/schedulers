@@ -306,8 +306,6 @@ static inline void sched_setup_lo(uint16_t goal) {
     TIM_DIER(SCHED_TIMlo) |= TIM_DIER_CC1IE;
 }
 
-void debug(char *c, uint32_t i);
-
 static bool sched_setup(uint32_t goal_time) {
     int32_t time, rem;
     uint32_t primask = sched_irq_disable();
@@ -324,7 +322,6 @@ static bool sched_setup(uint32_t goal_time) {
         // setup high timer
         sched_setup_hi(goal_time >> 16);
     } else {
-        // debug("setup", rem);
         // setup low timer
         sched_setup_lo(goal_time & 0xffff);
     }
@@ -397,12 +394,10 @@ static void sched_restoretask() {
 
 
 static void sched_ontimhi() {
-    debug("hi", 1);
     while(sched_nexttask() == false);
 }
 
 static void sched_ontimlo() {
-    debug("lo", 0);
     while(sched_nexttask() == false);
 }
 
