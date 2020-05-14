@@ -43,17 +43,19 @@ static void list_append(sched_list *list, sched_task *task) {
  * @param prev (n-1)th task in given list
  */
 static void list_exchange(sched_list *list, sched_task *cur, sched_task *prev) {
-    if(list->last == cur) {
-        list->last = prev;
-        prev->sched_next = NULL;
-    } else {
-        prev->sched_next = cur->sched_next;
-    }
     if(list->first == prev) {
         list->first = cur;
         cur->sched_prev = NULL;
     } else {
         cur->sched_prev = prev->sched_prev;
+        prev->sched_prev->sched_next = cur;
+    }
+    if(list->last == cur) {
+        list->last = prev;
+        prev->sched_next = NULL;
+    } else {
+        prev->sched_next = cur->sched_next;
+        cur->sched_next->sched_prev = prev;
     }
     cur->sched_next = prev;
     prev->sched_prev = cur;
