@@ -198,7 +198,7 @@ static void rcc_periph_clock_enable_tim(uint32_t TIM) {
 }
 
 static void nvic_enable_irq_tim(uint32_t TIM) {
-    const uint8_t priority = 0;
+    const uint8_t priority = 0xff;
     if(TIM == TIM1) {
         nvic_enable_irq(NVIC_TIM1_CC_IRQ);
         nvic_set_priority(NVIC_TIM1_CC_IRQ, priority);
@@ -222,6 +222,7 @@ void sched_init() {
     scheduler.realtime_tasks.first = scheduler.realtime_tasks.last = NULL;
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
     scheduler.cur_task = &scheduler.main_task;
+    nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
 
     /** Init timer **/
 
