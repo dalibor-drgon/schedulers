@@ -222,6 +222,7 @@ void sched_taskp_tick(sched_task *task);
 /**************************** Mutex functions *********************************/
 
 void sched_mutex_lock(sched_mutex *mutex);
+bool sched_mutex_trylock(sched_mutex *mutex);
 void sched_mutex_unlock(sched_mutex *mutex);
 
 
