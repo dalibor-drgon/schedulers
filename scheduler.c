@@ -251,7 +251,7 @@ static bool sched_task_tick_reinit_syscall(void *data, sched_task *task) {
     task->state = SCHEDSTATE_READY;
     sched_taskp_tick(task);
     sched_taskp_reinit(task);
-    sched_task_fire(task, 0);
+    sched_task_enqueue(task);
     return false;
 }
 
