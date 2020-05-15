@@ -1,56 +1,24 @@
 
-This is simple real-time only scheduler targetting ARM Cortex M3 using just
-PendSV exception with the support for system calls. 
+This is simple real-time only scheduler targetting ARM Cortex M3 implemented
+using PendSV exceptions and TIMers with the support for system calls and
+synchronization.
 Internally uses bubble sort with double-linked lists for maximum
 performance (for small ~8 and very small ~2 number of tasks this outperforms
-heap and is also a bit simpler both for usage and implementation-wise).
-The user can choose between lazy EDF (earliest deadline first scheduling) or
-lazy RMS (rate monotomic scheduling) - it
-does not pre-empt already running tasks, performs context switch only when
-currently running task finishes. With specific configuration, it is possible
-that the user won't notice any difference between lazy version and normal
-version of these algorithms. Since a task must finish before another is
-scheduled, no mutexes nor conditionals are needed for synchronization to avoid
-race conditions.
+heap and is also a bit simpler both for usage and implementation-wise and does
+not require allocation of any arrays or other structures except of tasks themselves).
+The user can choose between EDF (earliest deadline first scheduling) or
+RMS (rate monotomic scheduling). Tasks with greater priority will pre-empt
+already running tasks, so mutexes should be used for synchronization.
 
 # Usage
 
 ## Dependencies
 
-First implement following functions:
+For initialization, this library uses [libopencm3](https://libopencm3.org/)
+library, but the code should be easy to port to work with other libraries as
+well.
 
-```c
-extern uint32_t sched_ticks();
-extern int sched_irq_disable();
-extern void sched_irq_enable();
-```
-
-The first function `sched_ticks()` has to return number of ticks (number of
-microseconds, milliseconds or whatnot). If you return milliseconds, the
-arguments in `sched_task_add()` will be in milliseconds, if this function
-returns time in microseconds, the arguments in `sched_task_add()` will be in
-microseconds and so on.
-
-Functions `sched_irq_disable()` and `sched_irq_enable()` can be implemented in
-following fashion:
-
-```c
-int sched_irq_disable() {
-  uint32_t result;
-  __asm__ volatile ("MRS %0, primask\n\t"
-                    "CPSID i" : "=r" (result) );
-  return result & 1;
-
-}
-
-void sched_irq_enable() {
-    __asm__ volatile("CPSIE i");
-}
-```
-
-or, if you are using `armcc`, you can simply replace them with `__disable_irq()`
-and `__enable_irq()` functions.
-
+Make sure to check and edit macros in `scheduler-config.h` file.
 
 ## Initialization
 
@@ -128,6 +96,21 @@ int main() {
 
 ```
 
+
+## Timer
+
+For its own use, this library cascades two configurable 16bit timers to be used
+as single 32bit timer for scheduling and context-switching. You can obtain the
+current time in microseconds with the function
+
+```c
+uint32_t sched_ticks();
+```
+
+This can cover time from -35 minutes ago to 35 minutes in future, and allowing
+for task interval to be up to 17 minutes long.
+
+
 ## System calls
 
 To perform a system call, call `sched_syscall()`:
@@ -158,3 +141,101 @@ For example, you can reimplement your UART output to use system calls, and once
 it finishes, you can call `sched_task_fire()` (even from interrupt), and the resumed
 task will be scheduled to run asap. You can reimplement basically anything that
 blocks and fires interrupt once it finishes, e.g. SPI, I2C, sleep() etc.
+
+
+## Mutexes
+
+To achieve synchronization between tasks, you can use pthread-like mutexes. They
+are also cheap if only one thread uses them at a time, otherwise a short syscall
+is generated. 
+
+To start allocate a single mutex:
+
+```c
+sched_mutex mutex = SCHED_MUTEX_INIT;
+```
+
+The usage is same as pthreads' mutexes. If you don't know how to use 
+mutexes, you should probably find some guide to get the gist. Basically,
+whenever you enter critical section that can be executed only by one thread at a
+time, you use mutexes. Before entering the critical section, you lock the mutex
+with
+```c
+sched_mutex_lock(&mutex);
+```
+and once you finish, you have to unlock the mutex to let other threads in.
+```c
+sched_mutex_unlock(&mutex);
+```
+
+Optionally, you can use `sched_mutex_trylock(sched_mutex *mutex)`:
+
+```c
+if(sched_mutex_trylock(&mutex)) {
+    // mutex acquired, do some stuff...
+    sched_mutex_unlock(&mutex);
+} else {
+    // failed to acquire the mutex
+}
+```
+
+## Example usage: UART send
+
+Let's say you wish to re-implement UART to be blocking. This can be easily done
+if you already have working implementation using interrupts or DMA that can
+signalize end with custom callback.
+
+Specifically, you have to implement two functions. One - syscall - to start the transmission, and
+second one - the callback - to resume the blocking thread. Optionally, if you
+wish to use this syscall from multiple threads, you should put calls to it around
+mutex.
+
+The syscall itself can be implemented in following fashion:
+
+```c
+/// This function should start transmission of string stored in `str` of length 
+/// `length` and once it finishes, the `callback` should be called.
+extern void uart_start_transmission(char *str, unsigned length, void (*callback)());
+
+/// Task to be resumed once uart transmission finishes
+static sched_task *task_to_resume;
+
+/// Syscall that sets-up the uart to start transmission for given task
+bool uart_print_syscall(void *data, sched_task *task) {
+    char *str = (char *) data;
+    // Save the pointer to the current task
+    task_to_resume = task;
+    // And fire up the uart
+    uart_start_transmission(str, strlen(str), uart_on_finish);
+}
+```
+
+... and the callback:
+
+```c
+void uart_on_finish() {
+    /// Resume the thread with error code 0
+    sched_task_fire(task_to_resume, 0);
+}
+```
+
+You can use this added functionality together with `sched_syscall()` function:
+
+```c
+    char *strng = "Hello world!";
+    int err = sched_syscall(uart_print_syscall, strng);
+    if(err != 0) { /*/ something went wrong */ }
+```
+
+You can make it thread-safe using mutexes and optionally make helper function
+`uart_print_threadsafe()` to make your code more readable.
+
+```c
+static sched_mutex uart_mutex = SCHED_MUTEX_INIT;
+int uart_print_threadsafe(char *strng) {
+    sched_mutex_lock(&uart_mutex);
+    int err = sched_syscall(uart_print_syscall, strng);
+    sched_mutex_unlock(&uart_mutex);
+    return err;
+}
+```
