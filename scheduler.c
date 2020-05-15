@@ -83,6 +83,17 @@ static void list_bubbleup(sched_list *list, sched_task *task,
     }
 }
 
+static sched_task *list_find_for_mutex(sched_list *list, sched_mutex *mutex) {
+    sched_task *task = list->first;
+    while(task != NULL) {
+        if(task->awaiting_mutex == mutex) {
+            break;
+        }
+        task = task->sched_next;
+    }
+    return task;
+}
+
 #if 0
 static void list_bubbledown(sched_list *list, sched_task *task, 
         bool (*is_lower)(sched_task *one, sched_task *two)) 
@@ -429,6 +440,44 @@ static bool sched_task_tick_syscall(void *data, sched_task *task) {
     return false;
 }
 
+static bool sched_mutex_lock_syscall(void *data, sched_task *cur_task) {
+    sched_mutex *mutex = (sched_mutex *) data;
+    sched_task *locked_task = (sched_task *) mutex->value;
+    if(locked_task == NULL) {
+        mutex->value = (uint32_t) cur_task;
+        // mutex_list_append(&cur_task->locked_mutexes, mutex);
+        return true;
+    }
+
+    mutex->value = (uint32_t) cur_task;
+    cur_task->awaiting_mutex = mutex;
+    list_append(&locked_task->dependant_tasks, cur_task);
+
+    return false;
+}
+
+static bool sched_mutex_unlock_syscall(void *data, sched_task *task) {
+    sched_mutex *mutex = (sched_mutex *) data;
+
+    sched_task *resumed_task = list_find_for_mutex(&task->dependant_tasks, mutex);
+
+    sched_expect(resumed_task != NULL);
+
+    // mutex_list_unlink(&task->locked_mutexes, mutex);
+    // mutex_list_append(&resumed_task->locked_mutexes, mutex);
+
+    list_unlink(&task->dependant_tasks, resumed_task);
+
+    // queue_enqueue(&scheduler.fired_tasks, resumed_task);
+    list_append(&scheduler.realtime_tasks, resumed_task);
+    list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+    // queue_enqueue(&scheduler.fired_tasks, task);
+    list_append(&scheduler.realtime_tasks, task);
+    list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+
+    return false;
+}
+
 /**************************** Task functions **********************************/
 
 void sched_task_tick() {
@@ -443,6 +492,9 @@ void sched_task_init(sched_task *task,
     task->entry_function = function;
     task->function_data = data;
     sched_taskp_reinit(task);
+
+    task->awaiting_mutex = NULL;
+    // task->locked_mutexes.first = task->locked_mutexes.last = NULL;
 
     task->sched_prev = task->sched_next = task->fired_next = NULL;
 }
@@ -473,6 +525,52 @@ void sched_task_fire(sched_task *task, int return_value) {
 
     sched_task_enqueue(task);
 }
+
+/**************************** Mutex functions *********************************/
+
+void sched_mutex_lock(sched_mutex *mutex) {
+    uint32_t new_mutex_value = (uint32_t) scheduler.cur_task;
+    uint32_t irq = sched_irq_disable();
+    uint32_t prev_value = mutex->value;
+    if(prev_value == 0) {
+        mutex->value = new_mutex_value;
+        // mutex_list_append(&scheduler.cur_task->locked_mutexes, mutex);
+        sched_irq_restore(irq);
+    } else {
+        sched_irq_restore(irq);
+        sched_syscall(sched_mutex_lock_syscall, mutex);
+    }
+}
+
+bool sched_mutex_trylock(sched_mutex *mutex) {
+    uint32_t new_mutex_value = (uint32_t) scheduler.cur_task;
+    uint32_t irq = sched_irq_disable();
+    uint32_t prev_value = mutex->value;
+    if(prev_value == 0) {
+        mutex->value = new_mutex_value;
+        // mutex_list_append(&scheduler.cur_task->locked_mutexes, mutex);
+        sched_irq_restore(irq);
+        return true;
+    } else {
+        sched_irq_restore(irq);
+        return false;
+    }
+}
+
+void sched_mutex_unlock(sched_mutex *mutex) {
+    uint32_t expected_value = (uint32_t) scheduler.cur_task;
+    uint32_t irq = sched_irq_disable();
+    uint32_t cur_val = mutex->value;
+    if(cur_val == expected_value) {
+        mutex->value = 0;
+        // mutex_list_unlink(&scheduler.cur_task->locked_mutexes, mutex);
+        sched_irq_restore(irq);
+    } else {
+        sched_irq_restore(irq);
+        sched_syscall(sched_mutex_unlock_syscall, mutex);
+    }
+}
+
 
 /**************************** Timer handlers **********************************/
 

@@ -11,6 +11,9 @@
 extern "C" {
 #endif
 
+
+#define SCHED_MUTEX_INIT {0}
+
 /// Task structure
 struct sched_task;
 typedef struct sched_task sched_task;
@@ -22,6 +25,9 @@ typedef struct sched sched;
 /// Stack inside PendSV and SysTick exception
 struct sched_stack;
 typedef struct sched_stack sched_stack;
+
+struct sched_mutex;
+typedef struct sched_mutex sched_mutex;
 
 typedef bool (*sched_syscall_function)(void *data, sched_task *task);
 typedef void (*sched_entry_function)(void *data);
@@ -56,6 +62,25 @@ struct sched_stack {
 
 extern sched scheduler;
 
+struct sched_mutex {
+    /// This is filled with pointer to the currently executed task
+    uint32_t value;
+    // sched_mutex *prev, *next;
+};
+
+
+typedef struct sched_list {
+    sched_task *first, *last;
+} sched_list;
+
+typedef struct sched_queue {
+    sched_task *first, *last;
+} sched_queue;
+
+typedef struct sched_mutex_queue {
+    sched_mutex *first, *last;
+} sched_mutex_list;
+
 /// Contains state of task
 typedef enum sched_task_state {
     /// The task is either running or waiting to be run - check
@@ -74,9 +99,14 @@ struct sched_task {
     sched_task *sched_prev, *sched_next;
     sched_task *fired_next;
 
+    // sched_mutex_list locked_mutexes;
+    /// Tasks waiting for mutex to be released
+    sched_list dependant_tasks;
+
     void *sp_end, *sp;
     sched_task_state state;
     uint8_t _pad0, _pad1, _pad2;
+    sched_mutex *awaiting_mutex;
 
     union {
         sched_task_realtime realtime;
@@ -85,14 +115,6 @@ struct sched_task {
     sched_entry_function entry_function;
     void *function_data;
 };
-
-typedef struct sched_list {
-    sched_task *first, *last;
-} sched_list;
-
-typedef struct sched_queue {
-    sched_task *first, *last;
-} sched_queue;
 
 struct sched {
     /**
@@ -195,6 +217,12 @@ static inline sched_task *sched_task_current() {
 // Can be called from syscall
 
 void sched_taskp_tick(sched_task *task);
+
+
+/**************************** Mutex functions *********************************/
+
+void sched_mutex_lock(sched_mutex *mutex);
+void sched_mutex_unlock(sched_mutex *mutex);
 
 
 #ifdef __cplusplus
