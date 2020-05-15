@@ -77,7 +77,7 @@ struct sched_task {
 
     void *sp_end, *sp;
     sched_task_state state;
-    uint32_t _pad0:24;
+    uint8_t _pad0, _pad1, _pad2;
 
     union {
         sched_task_realtime realtime;
