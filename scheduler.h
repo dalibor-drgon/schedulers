@@ -110,7 +110,8 @@ struct sched {
 
     /**
      * @brief Realtime tasks that are to be added to the `realtime_tasks` list
-     * once their time comes (once task.next_execution ).
+     * once their time comes (once task.next_execution equals to or is lower
+     * than sched_ticks()).
      */
     sched_list realtime_tasks_waiting;
 
