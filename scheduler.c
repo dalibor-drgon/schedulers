@@ -315,6 +315,23 @@ static void return_function() {
     sched_syscall(sched_task_tick_reinit_syscall, NULL);
 }
 
+static void sched_handle_syscall() {
+    sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
+    sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
+    void * data = (void *) stack->r1;
+    if(syscall_func != NULL) {
+        scheduler.cur_task->state = SCHEDSTATE_BLOCKING;
+        sched_movetask();
+        if(syscall_func(data, scheduler.cur_task) == false) {
+            while(sched_nexttask() == false);
+        } else {
+            sched_restoretask();
+        }
+    } else {
+        while(sched_nexttask() == false);
+    }
+}
+
 void __attribute__((__naked__)) PendSV_Handler() {
     const uint32_t RETURN_ON_PSP = 0xfffffffd;
 
@@ -364,22 +381,7 @@ void __attribute__((__naked__)) PendSV_Handler() {
 	}
 
 	/* 3. Call context switch function, changes current TCB */
-    register sched_syscall_function syscall_func asm ("r0");
-    register void * data asm ("r1");
-    if(syscall_func != NULL) {
-        scheduler.cur_task->state = SCHEDSTATE_BLOCKING;
-        sched_movetask();
-        if(syscall_func(data, scheduler.cur_task) == false) {
-            while(sched_nexttask() == false);
-        } else {
-            sched_restoretask();
-        }
-        //     sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
-        //     stack->r0 = ret;
-    } else {
-        while(sched_nexttask() == false);
-    }
-
+    sched_handle_syscall();
 
 	/* 4. Load PSP from TCB */
 	/* 5. Pop R4..R11 from the program stack */
