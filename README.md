@@ -146,7 +146,7 @@ blocks and fires interrupt once it finishes, e.g. SPI, I2C, sleep() etc.
 ## Mutexes
 
 To achieve synchronization between tasks, you can use pthread-like mutexes. They
-are also cheap if only one thread uses them at a time, otherwise a short syscall
+are also cheap if only one task uses them at a time, otherwise a short syscall
 is generated. 
 
 To start allocate a single mutex:
@@ -190,7 +190,7 @@ second one - the callback - to resume the blocking thread. Optionally, if you
 wish to use this syscall from multiple threads, you should put calls to it around
 mutex.
 
-The syscall itself can be implemented in following fashion:
+The syscall itself can be implemented in the following fashion:
 
 ```c
 /// This function should start transmission of string stored in `str` of length 
@@ -207,6 +207,7 @@ bool uart_print_syscall(void *data, sched_task *task) {
     task_to_resume = task;
     // And fire up the uart
     uart_start_transmission(str, strlen(str), uart_on_finish);
+    return false; // false means this thread blocks
 }
 ```
 
