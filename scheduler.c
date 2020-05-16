@@ -402,6 +402,7 @@ static void sched_movetask() {
 
 static void sched_restoretask() {
     // if(scheduler.cur_task->state == SCHEDSTATE_READY) {
+        scheduler.cur_task->state = SCHEDSTATE_READY;
         list_append(&scheduler.realtime_tasks, scheduler.cur_task);
         list_bubbleup(&scheduler.realtime_tasks, scheduler.cur_task, list_rt_islower);
     // }
