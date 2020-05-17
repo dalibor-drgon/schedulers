@@ -487,6 +487,60 @@ static bool sched_mutex_unlock_syscall(void *data, sched_task *task) {
     return false;
 }
 
+typedef struct {
+    sched_cond *cond;
+    sched_mutex *mutex;
+} sched_cond_mutex_pair;
+
+static bool sched_cond_wait_syscall(void *data, sched_task *cur_task) {
+    sched_cond_mutex_pair *pair = (sched_cond_mutex_pair *) data;
+    sched_cond *cond = pair->cond;
+    sched_mutex *mutex = pair->mutex;
+
+    // Add current task to the conditional list
+    list_append(&cond->tasks, cur_task);
+
+    uint32_t cur_value = mutex->value;
+    uint32_t expected_value = (uint32_t) cur_task;
+    if(cur_value == expected_value) {
+        // Just change the variable
+        mutex->value = 0;
+    } else {
+        // Unlock dependant task
+        sched_task *resumed_task = list_find_for_mutex(&cur_task->dependant_tasks, mutex);
+        sched_expect(resumed_task != NULL);
+        list_unlink(&cur_task->dependant_tasks, resumed_task);
+
+        list_append(&scheduler.realtime_tasks, resumed_task);
+        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+    }
+    return false;
+}
+
+static bool sched_cond_signal_syscall(void *data, sched_task *cur_task) {
+    sched_cond *cond = (sched_cond *) data;
+    sched_task *resumed_task = cond->tasks.first;
+    if(resumed_task == NULL) {
+        // Done
+    } else {
+        list_unlink(&cond->tasks, resumed_task);
+        list_append(&scheduler.realtime_tasks, resumed_task);
+        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+    }
+    return true;
+}
+
+static bool sched_cond_broadcast_syscall(void *data, sched_task *cur_task) {
+    sched_cond *cond = (sched_cond *) data;
+    sched_task *resumed_task;
+    while((resumed_task = cond->tasks.first) != NULL) {
+        list_unlink(&cond->tasks, resumed_task);
+        list_append(&scheduler.realtime_tasks, resumed_task);
+        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+    }
+    return true;
+}
+
 /**************************** Task functions **********************************/
 
 void sched_task_tick() {
@@ -581,6 +635,24 @@ void sched_mutex_unlock(sched_mutex *mutex) {
     }
 }
 
+
+/**************************** Cond functions **********************************/
+
+void sched_cond_wait(sched_cond *cond, sched_mutex *mutex) {
+    sched_cond_mutex_pair pair = {.cond = cond, .mutex = mutex};
+    // This syscall will block until either signal or broadcast is performed
+    sched_syscall(sched_cond_wait_syscall, &pair);
+    // It will then wake up and try to acquire this mutex
+    sched_mutex_lock(mutex);
+}
+
+void sched_cond_signal(sched_cond *cond) {
+    sched_syscall(sched_cond_signal_syscall, cond);
+}
+
+void sched_cond_broadcast(sched_cond *cond) {
+    sched_syscall(sched_cond_broadcast_syscall, cond);
+}
 
 /**************************** Timer handlers **********************************/
 

@@ -13,6 +13,7 @@ extern "C" {
 
 
 #define SCHED_MUTEX_INIT {0}
+#define SCHED_COND_INIT {{(sched_task *) 0, (sched_task *) 0}}
 
 /// Task structure
 struct sched_task;
@@ -28,6 +29,9 @@ typedef struct sched_stack sched_stack;
 
 struct sched_mutex;
 typedef struct sched_mutex sched_mutex;
+
+struct sched_cond;
+typedef struct sched_cond sched_cond;
 
 typedef bool (*sched_syscall_function)(void *data, sched_task *task);
 typedef void (*sched_entry_function)(void *data);
@@ -68,7 +72,6 @@ struct sched_mutex {
     // sched_mutex *prev, *next;
 };
 
-
 typedef struct sched_list {
     sched_task *first, *last;
 } sched_list;
@@ -80,6 +83,14 @@ typedef struct sched_queue {
 typedef struct sched_mutex_queue {
     sched_mutex *first, *last;
 } sched_mutex_list;
+
+struct sched_cond {
+    // List containing all tasks waiting for this conditional
+    sched_list tasks;
+    // // Last task to be signaled. Used when sched_cond_broadcast() is used. NULL
+    // // means no tasks are to be signaled.
+    // sched_task *last;
+};
 
 /// Contains state of task
 typedef enum sched_task_state {
@@ -224,6 +235,12 @@ void sched_taskp_tick(sched_task *task);
 void sched_mutex_lock(sched_mutex *mutex);
 bool sched_mutex_trylock(sched_mutex *mutex);
 void sched_mutex_unlock(sched_mutex *mutex);
+
+/**************************** Cond functions **********************************/
+
+void sched_cond_wait(sched_cond *cond, sched_mutex *mutex);
+void sched_cond_signal(sched_cond *cond);
+void sched_cond_broadcast(sched_cond *cond);
 
 
 #ifdef __cplusplus
