@@ -261,16 +261,15 @@ void sched_init() {
     nvic_enable_irq_tim(SCHED_TIMlo);
 }
 
+void uart_print(char *c);
+
 void sched_start() {
     sched_syscall(NULL, NULL);
 }
 
-// int __attribute__((noinline, naked)) sched_syscall(
-//     sched_syscall_function syscall_function,
-//     void *data) {
-    
-//     asm ("svc 0\n\tnop\n\tbx lr");
-// }
+void sched_apply() {
+    sched_syscall(NULL, NULL);
+}
 
 static sched_syscall_function pendsv_syscall_function;
 static void * pendsv_syscall_data;

@@ -193,6 +193,8 @@ void sched_init();
 
 void sched_start();
 
+void sched_apply();
+
 int sched_syscall(
     sched_syscall_function syscall_function,
     void *data);
