@@ -215,6 +215,18 @@ static void nvic_enable_irq_tim(uint32_t TIM) {
 #define sched_trigger_pendsv()      \
 	SCB_ICSR |= SCB_ICSR_PENDSVSET;
 
+
+/**************************** Main task ***************************************/
+
+static uint8_t sleep_task_sp[128];
+
+void sleep_task_entry(void *ign) {
+    // Just keep entering sleep mode and wait for TIMer interrupt to wake up
+    while(1) {
+        asm volatile("WFI");
+    }
+}
+
 /**************************** Scheduler functions *****************************/
 
 
@@ -222,7 +234,10 @@ void sched_init() {
     /** Init scheduler **/
     scheduler.realtime_tasks.first = scheduler.realtime_tasks.last = NULL;
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
-    scheduler.cur_task = &scheduler.main_task;
+    scheduler.cur_task = &scheduler.sleep_task;
+    scheduler.sleep_task.state = SCHEDSTATE_READY;
+    sched_task_init(&scheduler.sleep_task, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
+
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
 
     /** Init timer **/
@@ -350,7 +365,7 @@ static void sched_unsetup() {
     TIM_DIER(SCHED_TIMhi) &= ~TIM_DIER_CC1IE;
 }
 
-static bool sched_nexttask() {
+static sched_task *sched_nexttask() {
     do {
         // Add fired tasks from queue into realtime_tasks_waiting list
         sched_task *task;
@@ -387,12 +402,18 @@ static bool sched_nexttask() {
         }
     } while(true);
 
-    if(scheduler.realtime_tasks.first == NULL) return false;
+    if(scheduler.realtime_tasks.first == NULL) {
+        return scheduler.cur_task = &scheduler.sleep_task;
+    }
     
     // Pick process
     scheduler.cur_task = scheduler.realtime_tasks.first;
     int32_t rem = scheduler.cur_task->data.realtime.next_execution - sched_ticks();
-    return rem <= 0;
+    if(rem <= 0) {
+        return scheduler.cur_task;
+    } else {
+        return scheduler.cur_task = &scheduler.sleep_task;
+    }
 }
 
 static void sched_movetask() {
@@ -676,7 +697,7 @@ static void return_function() {
     sched_syscall(sched_task_tick_reinit_syscall, NULL);
 }
 
-static void sched_handle_syscall() {
+static sched_task *sched_handle_syscall() {
     // sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
     // sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
     // void * data = (void *) stack->r1;
@@ -684,20 +705,21 @@ static void sched_handle_syscall() {
     pendsv_syscall_function = NULL;
     void * data = pendsv_syscall_data;
     if(syscall_func != NULL) {
-        scheduler.cur_task->state = SCHEDSTATE_BLOCKING;
+        sched_task *cur_task = scheduler.cur_task;
+        cur_task->state = SCHEDSTATE_BLOCKING;
         sched_movetask();
         if(syscall_func(data, scheduler.cur_task) == false) {
-            while(sched_nexttask() == false);
+            return sched_nexttask();
         } else {
             sched_restoretask();
+            return cur_task;
         }
     } else {
-        while(sched_nexttask() == false);
+        return sched_nexttask();
     }
 }
 
 void __attribute__((__naked__)) PendSV_Handler() {
-    const uint32_t RETURN_ON_PSP = 0xfffffffd;
 
 	/* 0. NVIC has already pushed some registers on the program/main stack.
 	 * We are free to modify R0..R3 and R12 without saving them again, and
@@ -730,34 +752,23 @@ void __attribute__((__naked__)) PendSV_Handler() {
 		/* 2. Store that PSP in the current TCB */
 	    scheduler.cur_task->sp = psp;
 	} else {
-		/* This PendSV call was made from a task using the MSP. This
-		 * code is not equipped to return to the main task, but we store
-		 * the proper registers here anyway for good form. */
-
-		/* 1. Push all other registers (R4..R11) on the main stack */
-        void *sp;
-		__asm__(
-			/* Push context on main stack */
-			"STMDB SP!, {r4-r11}\n\t"
-            "MOV %0, SP" 
-            : "=r" (sp));
-
-		/* 2. Store that PSP in the current TCB */
-		scheduler.cur_task->sp = sp;
-	}
+		/* This PendSV call was made from a task using the MSP. Don't do
+		anything, stack does not have to be saved since we will never context
+		switch to a task using MSP, only PSP. */
+    }
 
 	/* 3. Call context switch function, changes current TCB */
-    sched_handle_syscall();
+    sched_task *task = sched_handle_syscall();
 
-	/* 4. Load PSP from TCB */
-	/* 5. Pop R4..R11 from the program stack */
-	void *psp = scheduler.cur_task->sp;
-	__asm__(
-		"LDMIA %0!, {r4-r11}\n"
-		"MSR psp, %0\n"
-		:: "r" (psp));
+    /* 4. Load PSP from TCB */
+    void *psp = task->sp;
+    /* 5. Pop R4..R11 from the program stack */
+    __asm__(
+        "LDMIA %0!, {r4-r11}\n"
+        "MSR psp, %0\n"
+        :: "r" (psp));
 
     // Finally, return. NVIC will pop registers from stack we set up and jump
     // where PC points to.
-	__asm__("bx %0" :: "r"(RETURN_ON_PSP));
+    __asm__("bx %0" :: "r"(0xfffffffd));
 }

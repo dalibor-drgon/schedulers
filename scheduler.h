@@ -156,10 +156,11 @@ struct sched {
     sched_queue fired_tasks;
 
     /**
-     * @brief Main thread (which initializes threads and starts the
-     * context-switching).
+     * @brief Sleep thread which is switched to whenever the scheduler has no
+     * tasks to be scheduled. This thread just enters loop from which it calls
+     * WFI instruction to enter light Sleep mode.
      */
-    sched_task main_task;
+    sched_task sleep_task;
 };
 
 /**************************** Utilities ***************************************/
