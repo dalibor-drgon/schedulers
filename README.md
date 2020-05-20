@@ -179,6 +179,41 @@ if(sched_mutex_trylock(&mutex)) {
 }
 ```
 
+
+## Condition variable
+
+Additionaly to mutexes there are conditional variables to allow for easier
+inter-task synchronization. The usage is same as for `pthread_cont_t`:
+
+```c
+sched_mutex = SCHED_MUTEX_INIT;
+sched_cond = SCHED_COND_INIT;
+
+sched_mutex_lock(&mutex);
+sched_cond_wait(&cond, &mutex);
+// Do something here
+sched_mutex_unnlock(&mutex);
+
+sched_cond_signal(&cond);
+
+sched_cond_broadcast(&cond);
+```
+
+With `sched_cond_wait()` you add current task to a queue and the current
+task blocks until it is removed by calling either `sched_cond_signal()`, which
+removes the first task (if any) from the queue in FIFO fashion, or until all the
+waiting tasks are unblocked by some task calling `sched_cond_broadcast()`.
+
+To make this scheduler more versatile, there are also alternatives to signaling
+and broadcasting a signal functions that can be called from isr.
+
+```c
+sched_cond_signal_fromisr(&cond);
+
+sched_cond_broadcast_fromisr(&cond);
+```
+
+
 ## Example usage: UART send
 
 Let's say you wish to re-implement UART to be blocking. This can be easily done
