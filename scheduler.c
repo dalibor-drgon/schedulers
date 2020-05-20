@@ -561,6 +561,34 @@ static bool sched_cond_broadcast_syscall(void *data, sched_task *cur_task) {
     return true;
 }
 
+/**************************** Cond functions from ISR *************************/
+
+void sched_cond_signal_fromisr(sched_cond *cond) {
+    uint32_t primask = sched_irq_disable();
+    sched_task *resumed_task = cond->tasks.first;
+    if(resumed_task == NULL) {
+        sched_irq_restore(primask);
+        // Done
+    } else {
+        list_unlink(&cond->tasks, resumed_task);
+        sched_irq_restore(primask);
+        sched_task_enqueue(resumed_task);
+    }
+}
+
+void sched_cond_broadcast_fromisr(sched_cond *cond) {
+    uint32_t primask = sched_irq_disable();
+    sched_task *resumed_task;
+    while((resumed_task = cond->tasks.first) != NULL) {
+        list_unlink(&cond->tasks, resumed_task);
+        sched_irq_restore(primask);
+        sched_task_enqueue(resumed_task);
+        primask = sched_irq_disable();
+    }
+    sched_irq_restore(primask);
+}
+
+
 /**************************** Task functions **********************************/
 
 void sched_task_tick() {

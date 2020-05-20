@@ -245,6 +245,9 @@ void sched_cond_wait(sched_cond *cond, sched_mutex *mutex);
 void sched_cond_signal(sched_cond *cond);
 void sched_cond_broadcast(sched_cond *cond);
 
+void sched_cond_signal_fromisr(sched_cond *cond);
+void sched_cond_broadcast_fromisr(sched_cond *cond);
+
 
 #ifdef __cplusplus
 }
