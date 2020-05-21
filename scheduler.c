@@ -539,11 +539,14 @@ static bool sched_cond_wait_syscall(void *data, sched_task *cur_task) {
 
 static bool sched_cond_signal_syscall(void *data, sched_task *cur_task) {
     sched_cond *cond = (sched_cond *) data;
+    uint32_t primask = sched_irq_disable();
     sched_task *resumed_task = cond->tasks.first;
     if(resumed_task == NULL) {
+        sched_irq_restore(primask);
         // Done
     } else {
         list_unlink(&cond->tasks, resumed_task);
+        sched_irq_restore(primask);
         list_append(&scheduler.realtime_tasks, resumed_task);
         list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
     }
@@ -552,12 +555,16 @@ static bool sched_cond_signal_syscall(void *data, sched_task *cur_task) {
 
 static bool sched_cond_broadcast_syscall(void *data, sched_task *cur_task) {
     sched_cond *cond = (sched_cond *) data;
+    uint32_t primask = sched_irq_disable();
     sched_task *resumed_task;
     while((resumed_task = cond->tasks.first) != NULL) {
         list_unlink(&cond->tasks, resumed_task);
+        sched_irq_restore(primask);
         list_append(&scheduler.realtime_tasks, resumed_task);
         list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+        primask = sched_irq_disable();
     }
+    sched_irq_restore(primask);
     return true;
 }
 
