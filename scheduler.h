@@ -107,8 +107,14 @@ typedef struct sched_task_realtime {
 } sched_task_realtime;
 
 struct sched_task {
-    sched_task *sched_prev, *sched_next;
-    sched_task *fired_next;
+    union {
+        struct {
+            sched_task *prev, *next;
+        } list;
+        struct {
+            sched_task *next;
+        } queue;
+    };
 
     // sched_mutex_list locked_mutexes;
     /// Tasks waiting for mutex to be released

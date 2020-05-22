@@ -15,28 +15,28 @@ static void list_unlink(sched_list *list, sched_task *task) {
     if(list->first == task && list->last == task) {
         list->first = NULL;
         list->last = NULL;
-        sched_expect(task->sched_prev == NULL);
-        sched_expect(task->sched_next == NULL);
+        sched_expect(task->list.prev == NULL);
+        sched_expect(task->list.next == NULL);
     } else {
-        sched_task *prev = task->sched_prev;
-        sched_task *next = task->sched_next;
-        if(prev != NULL) prev->sched_next = next;
-        if(next != NULL) next->sched_prev = prev;
-        if(list->first == task) list->first = task->sched_next;
-        if(list->last  == task) list->last  = task->sched_prev;
-        task->sched_prev = task->sched_next = NULL;
+        sched_task *prev = task->list.prev;
+        sched_task *next = task->list.next;
+        if(prev != NULL) prev->list.next = next;
+        if(next != NULL) next->list.prev = prev;
+        if(list->first == task) list->first = task->list.next;
+        if(list->last  == task) list->last  = task->list.prev;
+        task->list.prev = task->list.next = NULL;
     }
 } 
 
 static void list_append(sched_list *list, sched_task *task) {
-    sched_expect(task->sched_prev == NULL);
-    sched_expect(task->sched_next == NULL);
+    sched_expect(task->list.prev == NULL);
+    sched_expect(task->list.next == NULL);
     if(list->first == NULL /* && list->last == NULL */) {
         list->first = list->last = task;
     } else {
         sched_task *prev = list->last;
-        prev->sched_next = task;
-        task->sched_prev = prev;
+        prev->list.next = task;
+        task->list.prev = prev;
         list->last = task;
     }
 }
@@ -49,37 +49,37 @@ static void list_append(sched_list *list, sched_task *task) {
  * @param prev (n-1)th task in given list
  */
 static void list_exchange(sched_list *list, sched_task *cur, sched_task *prev) {
-    sched_expect(cur->sched_prev == prev);
-    sched_expect(prev->sched_next == cur);
+    sched_expect(cur->list.prev == prev);
+    sched_expect(prev->list.next == cur);
 
     if(list->first == prev) {
         list->first = cur;
-        cur->sched_prev = NULL;
+        cur->list.prev = NULL;
     } else {
-        cur->sched_prev = prev->sched_prev;
-        prev->sched_prev->sched_next = cur;
+        cur->list.prev = prev->list.prev;
+        prev->list.prev->list.next = cur;
     }
     if(list->last == cur) {
         list->last = prev;
-        prev->sched_next = NULL;
+        prev->list.next = NULL;
     } else {
-        prev->sched_next = cur->sched_next;
-        cur->sched_next->sched_prev = prev;
+        prev->list.next = cur->list.next;
+        cur->list.next->list.prev = prev;
     }
-    cur->sched_next = prev;
-    prev->sched_prev = cur;
+    cur->list.next = prev;
+    prev->list.prev = cur;
 }
 
 static void list_bubbleup(sched_list *list, sched_task *task, 
         bool (*is_lower)(sched_task *one, sched_task *two))
 {
-    sched_task *prev = task->sched_prev;
+    sched_task *prev = task->list.prev;
     while(prev != NULL) {
         if(is_lower(task, prev)) {
             list_exchange(list, task, prev);
         } else break;
 
-        prev = task->sched_prev;
+        prev = task->list.prev;
     }
 }
 
@@ -89,7 +89,7 @@ static sched_task *list_find_for_mutex(sched_list *list, sched_mutex *mutex) {
         if(task->awaiting_mutex == mutex) {
             break;
         }
-        task = task->sched_next;
+        task = task->list.next;
     }
     return task;
 }
@@ -119,9 +119,9 @@ static sched_task *queue_dequeue(sched_queue *queue) {
     if(queue->first == task && queue->last == task) {
         queue->first = queue->last = NULL;
     } else {
-        queue->first = task->fired_next;
+        queue->first = task->queue.next;
     }
-    task->fired_next = NULL;
+    task->queue.next = NULL;
 
     sched_irq_restore(primask);
     return task;
@@ -133,7 +133,7 @@ static void queue_enqueue(sched_queue *queue, sched_task *task) {
         queue->first = queue->last = task;
     } else {
         sched_task *prev = queue->last;
-        prev->fired_next = task;
+        prev->queue.next = task;
         queue->last = task;
     }
     sched_irq_restore(primask);
@@ -614,7 +614,7 @@ void sched_task_init(sched_task *task,
     task->awaiting_mutex = NULL;
     // task->locked_mutexes.first = task->locked_mutexes.last = NULL;
 
-    task->sched_prev = task->sched_next = task->fired_next = NULL;
+    task->list.prev = task->list.next = task->queue.next = NULL;
 }
 
 void sched_task_add(sched_task *task,
