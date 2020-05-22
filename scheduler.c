@@ -41,46 +41,29 @@ static void list_append(sched_list *list, sched_task *task) {
     }
 }
 
-/**
- * @brief Exchanges position of given two tasks in a list.
- * 
- * @param list Original list
- * @param cur nth task in given list
- * @param prev (n-1)th task in given list
- */
-static void list_exchange(sched_list *list, sched_task *cur, sched_task *prev) {
-    sched_expect(cur->list.prev == prev);
-    sched_expect(prev->list.next == cur);
+static void list_insertbefore(sched_list *list, sched_task *task, sched_task *next) {
+    if(next == NULL) {
+        list_append(list, task);
+    } else {
+        sched_task *prev = next->list.prev;
+        task->list.prev = prev;
+        if(prev) prev->list.next = task;
+        else list->first = task;
 
-    if(list->first == prev) {
-        list->first = cur;
-        cur->list.prev = NULL;
-    } else {
-        cur->list.prev = prev->list.prev;
-        prev->list.prev->list.next = cur;
+        next->list.prev = task;
+        task->list.next = next;
     }
-    if(list->last == cur) {
-        list->last = prev;
-        prev->list.next = NULL;
-    } else {
-        prev->list.next = cur->list.next;
-        cur->list.next->list.prev = prev;
-    }
-    cur->list.next = prev;
-    prev->list.prev = cur;
 }
 
-static void list_bubbleup(sched_list *list, sched_task *task, 
-        bool (*is_lower)(sched_task *one, sched_task *two))
-{
-    sched_task *prev = task->list.prev;
-    while(prev != NULL) {
-        if(is_lower(task, prev)) {
-            list_exchange(list, task, prev);
-        } else break;
-
-        prev = task->list.prev;
+static void list_insert(sched_list *list, sched_task *task, 
+        bool (*is_lower)(sched_task *one, sched_task *two)) {
+    sched_task *before = NULL, *cur = list->last;
+    while(cur != NULL) {
+        if(!is_lower(task, cur)) break;
+        before = cur;
+        cur = cur->list.prev;
     }
+    list_insertbefore(list, task, before);
 }
 
 static sched_task *list_find_for_mutex(sched_list *list, sched_mutex *mutex) {
@@ -93,18 +76,6 @@ static sched_task *list_find_for_mutex(sched_list *list, sched_mutex *mutex) {
     }
     return task;
 }
-
-#if 0
-static void list_bubbledown(sched_list *list, sched_task *task, 
-        bool (*is_lower)(sched_task *one, sched_task *two)) 
-{
-    /// This sequence is same as bubble down, but the performance may be better
-    /// or worse, depending on the variance of the intervals.
-    list_unlink(list, task);
-    list_append(list, task);
-    list_bubbleup(list, task, is_lower);
-}
-#endif
 
 
 /**************************** Queue functions *********************************/
@@ -373,8 +344,7 @@ static sched_task *sched_nexttask() {
             // Dequeue task
             task = queue_dequeue(&scheduler.fired_tasks);
             if(task == NULL) break;
-            list_append(&scheduler.realtime_tasks_waiting, task);
-            list_bubbleup(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
+            list_insert(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
         } while(true);
 
         // Move no-longer-waiting tasks into task pending list `realtime_tasks`
@@ -492,17 +462,12 @@ static bool sched_mutex_unlock_syscall(void *data, sched_task *task) {
 
     sched_expect(resumed_task != NULL);
 
-    // mutex_list_unlink(&task->locked_mutexes, mutex);
-    // mutex_list_append(&resumed_task->locked_mutexes, mutex);
-
     list_unlink(&task->dependant_tasks, resumed_task);
 
     // queue_enqueue(&scheduler.fired_tasks, resumed_task);
-    list_append(&scheduler.realtime_tasks, resumed_task);
-    list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+    list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
     // queue_enqueue(&scheduler.fired_tasks, task);
-    list_append(&scheduler.realtime_tasks, task);
-    list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+    list_insert(&scheduler.realtime_tasks, task, list_rt_islower);
 
     return false;
 }
@@ -531,8 +496,7 @@ static bool sched_cond_wait_syscall(void *data, sched_task *cur_task) {
         sched_expect(resumed_task != NULL);
         list_unlink(&cur_task->dependant_tasks, resumed_task);
 
-        list_append(&scheduler.realtime_tasks, resumed_task);
-        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+        list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
     }
     return false;
 }
@@ -547,8 +511,7 @@ static bool sched_cond_signal_syscall(void *data, sched_task *cur_task) {
     } else {
         list_unlink(&cond->tasks, resumed_task);
         sched_irq_restore(primask);
-        list_append(&scheduler.realtime_tasks, resumed_task);
-        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+        list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
     }
     return true;
 }
@@ -560,8 +523,7 @@ static bool sched_cond_broadcast_syscall(void *data, sched_task *cur_task) {
     while((resumed_task = cond->tasks.first) != NULL) {
         list_unlink(&cond->tasks, resumed_task);
         sched_irq_restore(primask);
-        list_append(&scheduler.realtime_tasks, resumed_task);
-        list_bubbleup(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
+        list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
         primask = sched_irq_disable();
     }
     sched_irq_restore(primask);
