@@ -114,30 +114,13 @@ static void queue_enqueue(sched_queue *queue, sched_task *task) {
 /**************************** List comparators ********************************/
 
 static bool list_rt_islower(sched_task *one, sched_task *two) {
-    // if(one->state == SCHEDSTATE_READY && two->state != SCHEDSTATE_READY) {
-    //     return true;
-    // }
-    // if(one->state != SCHEDSTATE_READY && two->state == SCHEDSTATE_READY) {
-    //     return false;
-    // }
-#ifdef SCHEDULER_USE_RMS
-    uint32_t interval_one = one->data.realtime.interval;
-    uint32_t interval_two = two->data.realtime.interval;
-    return (interval_one < interval_two);
-#else 
-    uint32_t deadline_one = one->data.realtime.next_execution + one->data.realtime.interval;
-    uint32_t deadline_two = two->data.realtime.next_execution + two->data.realtime.interval;
-    uint32_t ticks = sched_ticks();
-    int32_t rem_one = deadline_one - ticks;
-    int32_t rem_two = deadline_two - ticks;
-    return (rem_one < rem_two);
-#endif
+    return one->priority > two->priority;
 }
 
 static bool list_rtw_islower(sched_task *one, sched_task *two) {
     uint32_t ticks = sched_ticks();
-    int32_t rem_one = one->data.realtime.next_execution - ticks;
-    int32_t rem_two = two->data.realtime.next_execution - ticks;
+    int32_t rem_one = one->next_execution - ticks;
+    int32_t rem_two = two->next_execution - ticks;
     return rem_one < rem_two;
 }
 
@@ -207,7 +190,7 @@ void sched_init() {
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
     scheduler.cur_task = &scheduler.sleep_task;
     scheduler.sleep_task.state = SCHEDSTATE_READY;
-    sched_task_init(&scheduler.sleep_task, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
+    sched_task_init(&scheduler.sleep_task, 0, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
 
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
 
@@ -338,13 +321,18 @@ static void sched_unsetup() {
 
 static sched_task *sched_nexttask() {
     do {
-        // Add fired tasks from queue into realtime_tasks_waiting list
+        // Add fired tasks from queue into realtime_tasks or
+        // realtime_tasks_waiting list 
         sched_task *task;
         do {
             // Dequeue task
             task = queue_dequeue(&scheduler.fired_tasks);
             if(task == NULL) break;
-            list_insert(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
+            if(task->list_type == SCHEDLISTTYPE_WAITING) {
+                list_insert(&scheduler.realtime_tasks_waiting, task, list_rtw_islower);
+            } else {
+                list_insert(&scheduler.realtime_tasks, task, list_rt_islower);
+            }
         } while(true);
 
         // Move no-longer-waiting tasks into task pending list `realtime_tasks`
@@ -355,54 +343,35 @@ static sched_task *sched_nexttask() {
             if(task == NULL) break;
 
             // If current task is still waiting, break
-            int32_t rem_ticks = task->data.realtime.next_execution - ticks;
+            int32_t rem_ticks = task->next_execution - ticks;
             if(rem_ticks > 0) break; 
 
             list_unlink(&scheduler.realtime_tasks_waiting, task);
-            list_append(&scheduler.realtime_tasks, task);
-            list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+            list_insert(&scheduler.realtime_tasks, task, list_rt_islower);
         } while(true);
 
         if(scheduler.realtime_tasks_waiting.first == NULL) {
             sched_unsetup();
             break;
         } else {
-            if(!sched_setup(scheduler.realtime_tasks_waiting.first->data.realtime.next_execution))
+            if(!sched_setup(scheduler.realtime_tasks_waiting.first->next_execution))
                 break;
         }
     } while(true);
 
-    if(scheduler.realtime_tasks.first == NULL) {
-        return scheduler.cur_task = &scheduler.sleep_task;
+    if(scheduler.realtime_tasks.first != NULL) {
+        return scheduler.cur_task = scheduler.realtime_tasks.first;
     }
-    
-    // Pick process
-    scheduler.cur_task = scheduler.realtime_tasks.first;
-    int32_t rem = scheduler.cur_task->data.realtime.next_execution - sched_ticks();
-    if(rem <= 0) {
-        return scheduler.cur_task;
-    } else {
-        return scheduler.cur_task = &scheduler.sleep_task;
-    }
+    return scheduler.cur_task = &scheduler.sleep_task;
 }
 
 static void sched_movetask() {
     list_unlink(&scheduler.realtime_tasks, scheduler.cur_task);
 }
 
-static void sched_restoretask() {
-    // if(scheduler.cur_task->state == SCHEDSTATE_READY) {
-        scheduler.cur_task->state = SCHEDSTATE_READY;
-        list_append(&scheduler.realtime_tasks, scheduler.cur_task);
-        list_bubbleup(&scheduler.realtime_tasks, scheduler.cur_task, list_rt_islower);
-    // }
-}
-
 
 /**************************** Task privileged functions ***********************/
 // Can be run only at initialization phase or from syscall
-
-static void return_function();
 
 static void sched_taskp_reinit(sched_task *task) {
     task->sp = task->sp_end - sizeof(sched_stack);
@@ -410,32 +379,22 @@ static void sched_taskp_reinit(sched_task *task) {
     sched_stack *stack = (sched_stack *) task->sp;
     stack->psr = 0x21000000;
     stack->pc = task->entry_function;
-    stack->lr = return_function;
+    stack->lr = sched_task_delete;
     stack->r0 = (uint32_t) task->function_data;
-}
-
-void sched_taskp_tick(sched_task *task) {
-    task->data.realtime.next_execution += task->data.realtime.interval;
-    // list_bubbledown(&scheduler.realtime_tasks, scheduler.realtime_tasks.first,
-    //         list_rt_islower);
 }
 
 /**************************** Task built-in syscalls **************************/
 
-static bool sched_task_tick_reinit_syscall(void *data, sched_task *task) {
+static bool sched_task_delete_syscall(void *data, sched_task *cur_task) {
     (void) data;
-    task->state = SCHEDSTATE_READY;
-    sched_taskp_tick(task);
-    sched_taskp_reinit(task);
-    sched_task_enqueue(task);
+    cur_task->state = SCHEDSTATE_DEAD;
     return false;
 }
 
-static bool sched_task_tick_syscall(void *data, sched_task *task) {
-    (void) data;
-    task->state = SCHEDSTATE_READY;
-    sched_taskp_tick(task);
-    sched_task_fire(task, 0);
+static bool sched_task_sleepuntil_syscall(void *data, sched_task *cur_task) {
+    uint32_t goal = (uint32_t) data;
+    cur_task->next_execution = goal;
+    list_insert(&scheduler.realtime_tasks_waiting, cur_task, list_rtw_islower);
     return false;
 }
 
@@ -562,14 +521,12 @@ void sched_cond_broadcast_fromisr(sched_cond *cond) {
 
 /**************************** Task functions **********************************/
 
-void sched_task_tick() {
-    sched_syscall(sched_task_tick_syscall, NULL);
-}
 
-void sched_task_init(sched_task *task,
+void sched_task_init(sched_task *task, uint8_t priority,
         uint8_t *sp, unsigned sp_length,
         sched_entry_function function, void *data
 ) {
+    task->priority = priority;
     task->sp_end = sp + sp_length;
     task->entry_function = function;
     task->function_data = data;
@@ -581,18 +538,17 @@ void sched_task_init(sched_task *task,
     task->list.prev = task->list.next = task->queue.next = NULL;
 }
 
-void sched_task_add(sched_task *task,
-        uint32_t next_execution, uint32_t interval) {
-    task->state = SCHEDSTATE_READY;
-    task->data.realtime.next_execution = next_execution;
-    task->data.realtime.interval = interval;
-    queue_enqueue(&scheduler.fired_tasks, task);
-    // list_append(&scheduler.realtime_tasks, task);
-    // list_bubbleup(&scheduler.realtime_tasks, task, list_rt_islower);
+void sched_task_add(sched_task *task) {
+    sched_task_enqueue(task);
+}
+
+void sched_task_delete() {
+    sched_syscall(sched_task_delete_syscall, NULL);
 }
 
 void sched_task_enqueue(sched_task *task) {
     // Set state to READY
+    task->list_type = SCHEDLISTTYPE_RUNNING;
     task->state = SCHEDSTATE_READY;
 
     // Finally enqueue it into fired tasks queue to be processed from PendSV
@@ -608,6 +564,13 @@ void sched_task_fire(sched_task *task, int return_value) {
     sched_task_enqueue(task);
 }
 
+void sched_task_sleepuntil(uint32_t ticks) {
+    sched_syscall(sched_task_sleepuntil_syscall, (void *) ticks);
+}
+
+void sched_task_sleep(uint32_t ticks) {
+    sched_task_sleepuntil(sched_ticks() + ticks);
+}
 
 /**************************** Mutex functions *********************************/
 
@@ -683,7 +646,7 @@ void SCHED_TIMhi_IRQHandler() {
     if(scheduler.realtime_tasks_waiting.first == NULL) {
         sched_unsetup();
     } else {
-        if(!sched_setup(scheduler.realtime_tasks_waiting.first->data.realtime.next_execution)) {
+        if(!sched_setup(scheduler.realtime_tasks_waiting.first->next_execution)) {
             sched_trigger_pendsv();
         }
     }
@@ -691,10 +654,6 @@ void SCHED_TIMhi_IRQHandler() {
 
 
 /**************************** PendSV handler **********************************/
-
-static void return_function() {
-    sched_syscall(sched_task_tick_reinit_syscall, NULL);
-}
 
 static sched_task *sched_handle_syscall() {
     // sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
@@ -707,15 +666,12 @@ static sched_task *sched_handle_syscall() {
         sched_task *cur_task = scheduler.cur_task;
         cur_task->state = SCHEDSTATE_BLOCKING;
         sched_movetask();
-        if(syscall_func(data, scheduler.cur_task) == false) {
-            return sched_nexttask();
-        } else {
-            sched_restoretask();
-            return cur_task;
+        if(syscall_func(data, scheduler.cur_task) == true) {
+            scheduler.cur_task->state = SCHEDSTATE_READY;
+            list_insertbefore(&scheduler.realtime_tasks, scheduler.cur_task, scheduler.realtime_tasks.first);
         }
-    } else {
-        return sched_nexttask();
     }
+    return sched_nexttask();
 }
 
 void __attribute__((__naked__)) PendSV_Handler() {

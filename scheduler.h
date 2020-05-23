@@ -80,10 +80,6 @@ typedef struct sched_queue {
     sched_task *first, *last;
 } sched_queue;
 
-typedef struct sched_mutex_queue {
-    sched_mutex *first, *last;
-} sched_mutex_list;
-
 struct sched_cond {
     // List containing all tasks waiting for this conditional
     sched_list tasks;
@@ -98,13 +94,18 @@ typedef enum sched_task_state {
     /// scheduler.cur_task to find out.
     SCHEDSTATE_READY = 0, 
     /// Waiting for syscall/IO/sleep to finish.
-    SCHEDSTATE_BLOCKING = 1
+    SCHEDSTATE_BLOCKING = 1,
+    /// Ended
+    SCHEDSTATE_DEAD = 2
 } sched_task_state;
 
-typedef struct sched_task_realtime {
-    uint32_t next_execution;
-    uint32_t interval;
-} sched_task_realtime;
+typedef enum sched_task_list_type {
+    /// The task should be moved into scheduler.realtime_tasks
+    SCHEDLISTTYPE_RUNNING = 0,
+    /// The task should be moved into scheduler.realtime_tasks_waiting and wait
+    /// until task.next_exeuction time
+    SCHEDLISTTYPE_WAITING = 1
+} sched_task_list_type;
 
 struct sched_task {
     union {
@@ -116,18 +117,20 @@ struct sched_task {
         } queue;
     };
 
-    // sched_mutex_list locked_mutexes;
     /// Tasks waiting for mutex to be released
     sched_list dependant_tasks;
 
     void *sp_end, *sp;
     sched_task_state state;
-    uint8_t _pad0, _pad1, _pad2;
+    sched_task_list_type list_type;
+    uint8_t priority;
+    uint8_t _pad0;
     sched_mutex *awaiting_mutex;
 
-    union {
-        sched_task_realtime realtime;
-    } data;
+    /// If list_type == SCHEDLISTTYPE_WAITING or if this task is in
+    /// scheduler.realtime_tasks_waiting list, this is used as deadline for when
+    /// the task should be resumed.
+    uint32_t next_execution;
 
     sched_entry_function entry_function;
     void *function_data;
@@ -208,17 +211,22 @@ int sched_syscall(
 
 /**************************** Task functions **********************************/
 
-void sched_task_init(sched_task *task,
+void sched_task_init(sched_task *task, uint8_t priority,
         uint8_t *sp, unsigned sp_length,
         sched_entry_function function, void *data
 );
 
-void sched_task_add(sched_task *task,
-        uint32_t next_execution, uint32_t interval);
+void sched_task_add(sched_task *task);
+
+void sched_task_delete();
 
 void sched_task_enqueue(sched_task *task);
 
 void sched_task_fire(sched_task *task, int return_value);
+
+void sched_task_sleepuntil(uint32_t ticks);
+
+void sched_task_sleep(uint32_t ticks);
 
 /**
  * @brief For use in realtime tasks. Use this to signal the end of the task
