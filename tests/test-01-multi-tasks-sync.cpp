@@ -31,6 +31,7 @@ void uart_init() {
 // Scheduler
 sched_task tasks[NUM_TASKS+1];
 uint8_t __attribute__((aligned(8))) stacks[NUM_TASKS+1][128];
+uint32_t goals[NUM_TASKS+1] = {0};
 
 sched_mutex mutex = SCHED_MUTEX_INIT;
 sched_cond cond = SCHED_COND_INIT;
@@ -49,16 +50,23 @@ extern "C" void sched_expect_fail(char *file, int lineno) {
 
 // Consumer task #(2n)
 void enter1(void *arg) {
-    // Acquire mutex and wait for conditional variable
-    sched_mutex_lock(&mutex);
-    sched_cond_wait(&cond, &mutex);
-    // Let the user know that we are now using the CPU
-    uart.putchar('A' + ((char) (uint32_t) arg));
-    // Simulate CPU usage
-    uint16_t delay =  (((uint16_t) rand8() << 8) | rand8()) & 0xff;
-    MicroTimer::delay(delay);
-    // Finally unlock the mutex and let other tasks in
-    sched_mutex_unlock(&mutex);
+    while(1) {
+        // Acquire mutex and wait for conditional variable
+        sched_mutex_lock(&mutex);
+        sched_cond_wait(&cond, &mutex);
+        // Let the user know that we are now using the CPU
+        uint32_t index = (uint32_t) arg;
+        uart.putchar('A' + ((char) index));
+        // Simulate CPU usage
+        uint16_t delay =  (((uint16_t) rand8() << 8) | rand8()) & 0xff;
+        MicroTimer::delay(delay);
+        // Finally unlock the mutex and let other tasks in
+        sched_mutex_unlock(&mutex);
+
+        // Let other tasks work
+        uint16_t period = (((uint16_t) rand8() << 8) | rand8()) & 0x3fff;
+        sched_task_sleepuntil(goals[index] += period);
+    }
 }
 
 // Consumer task #(2n+1)
@@ -68,26 +76,35 @@ void enter2(void *arg) {
         sched_mutex_lock(&mutex);
         sched_cond_wait(&cond, &mutex);
         // Let the user know that we are now using the CPU
-        uart.putchar('a' + ((char) (uint32_t) arg));
+        uint32_t index = (uint32_t) arg;
+        uart.putchar('a' + ((char) index));
         // Simulate CPU usage
         uint16_t delay =  (((uint16_t) rand8() << 8) | rand8()) & 0xff;
         MicroTimer::delay(delay);
         // Finally unlock the mutex and let other tasks in
         sched_mutex_unlock(&mutex);
-        sched_task_tick();
+
+        // Let other tasks work
+        uint16_t period = (((uint16_t) rand8() << 8) | rand8()) & 0x3fff;
+        sched_task_sleepuntil(goals[index] += period);
     }
 }
 
 // Signaler task #NUM_TASKS
 void enter3(void *arg) {
-    // Acquire mutex
-    sched_mutex_lock(&mutex);
-    // Let the user know that we are now using the CPU
-    uart.putchar('-');
-    // Signalize via ocnditional variable
-    sched_cond_broadcast(&cond);
-    // Leave mutex to let other tasks in
-    sched_mutex_unlock(&mutex);
+    while(1) {
+        // Acquire mutex
+        sched_mutex_lock(&mutex);
+        // Let the user know that we are now using the CPU
+        uart.putchar('-');
+        // Signalize via ocnditional variable
+        sched_cond_broadcast(&cond);
+        // Leave mutex to let other tasks in
+        sched_mutex_unlock(&mutex);
+
+        // Wait and repeat
+        sched_task_sleepuntil(goals[NUM_TASKS] += 0x800);
+    }
 }
 
 
@@ -104,7 +121,7 @@ void sched_doinit() {
     for(unsigned i = 0; i < NUM_TASKS; i++) {
         uint8_t *stack = stacks[i];
         sched_task *task = &tasks[i];
-        sched_task_init(task, stack, 128, (i & 1) ? enter2 : enter1, (void*) (uint32_t) i);
+        sched_task_init(task, 0x7f, stack, 128, (i & 1) ? enter2 : enter1, (void*) (uint32_t) i);
         uint16_t period ;
         do {
             period =  (((uint16_t) rand8() << 8) | rand8()) & 0x7fff;
@@ -112,19 +129,15 @@ void sched_doinit() {
         uart.print((uint32_t) i);
         uart.print("th task (");
         uart.putchar('A' + (uint8_t) i);
-        uart.print(") [");
-        uart.print((uint32_t) task, 16);
-        uart.print("] with period ");
-        uart.print((uint32_t) period, 16);
-        uart.print("\r\n");
-        sched_task_add(task, 0, period);
+        uart.print(")\r\n");
+        sched_task_add(task);
     }
 
     // Initialize and add signaler task with period 0x800
     uint8_t *stack = stacks[NUM_TASKS];
     sched_task *task = &tasks[NUM_TASKS];
-    sched_task_init(task, stack, 128, enter3, NULL);
-    sched_task_add(task, 0, 0x800);
+    sched_task_init(task, 0x7f, stack, 128, enter3, NULL);
+    sched_task_add(task);
 }
 
 
