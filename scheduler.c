@@ -482,8 +482,10 @@ static bool sched_cond_wait_syscall(void *data, sched_task *cur_task) {
     sched_cond *cond = pair->cond;
     sched_mutex *mutex = pair->mutex;
 
+    uint32_t primask = sched_irq_disable();
     // Add current task to the conditional list
     list_append(&cond->tasks, cur_task);
+    sched_irq_restore(primask);
 
     uint32_t cur_value = mutex->value;
     uint32_t expected_value = (uint32_t) cur_task;
