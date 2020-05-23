@@ -9,12 +9,12 @@
  * 
  * This is simple test to check the behaviour and validity of list_* functions.
  * Compile as:
- *  gcc -g3 list.c -D __TEST__
+ *  gcc -g3 list.c -D __SCHEDULER_TEST2__
  * and execute the resulting binary few times to ensure it's working ok in this
  * context.
  */
 
-#ifdef __TEST__
+#ifdef __SCHEDULER_TEST2__
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,6 +127,31 @@ static void list_bubbleup(sched_list *list, sched_task *task,
     }
 }
 
+static void list_insertbefore(sched_list *list, sched_task *task, sched_task *next) {
+    if(next == NULL) {
+        list_append(list, task);
+    } else {
+        sched_task *prev = next->sched_prev;
+        task->sched_prev = prev;
+        if(prev) prev->sched_next = task;
+        else list->first = task;
+
+        next->sched_prev = task;
+        task->sched_next = next;
+    }
+}
+
+static void list_insert(sched_list *list, sched_task *task, 
+        bool (*is_lower)(sched_task *one, sched_task *two)) {
+    sched_task *before = NULL, *cur = list->last;
+    while(cur != NULL) {
+        if(!is_lower(task, cur)) break;
+        before = cur;
+        cur = cur->sched_prev;
+    }
+    list_insertbefore(list, task, before);
+}
+
 
 /**************************** MAIN ********************************************/
 
@@ -154,7 +179,22 @@ void check_tasks(sched_list *list, unsigned size) {
         count++;
     }
 
-    printf("Total count %u vs allocated %u\n", count, size);
+    task = list->last;
+    unsigned count2 = 0;
+    while(task != NULL) {
+        uint32_t cur_num = task->number;
+        if(cur_num > prev_num) {
+            printf(" - %08X/%08X fail\n", prev_num, cur_num);
+        } else {
+            // printf(" - %08X\n", cur_num);
+        }
+        prev_num = cur_num;
+
+        task = task->sched_prev;
+        count2++;
+    }
+
+    printf("Total count %u/%u vs allocated %u\n", count, count2, size);
 }
 
 int main() {
@@ -171,8 +211,7 @@ int main() {
         sched_task *task = &tasks[i];
         task->sched_next = task->sched_prev = NULL;
         task->number = rand();
-        list_append(&list, task);
-        list_bubbleup(&list, task, is_lower);
+        list_insert(&list, task, is_lower);
     }
 
     // Check tasks O(n)
