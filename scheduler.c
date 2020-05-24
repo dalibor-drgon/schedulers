@@ -190,6 +190,7 @@ void sched_init() {
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
     scheduler.cur_task = &scheduler.sleep_task;
     scheduler.sleep_task.state = SCHEDSTATE_READY;
+    scheduler.is_running = false;
     sched_task_init(&scheduler.sleep_task, 0, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
 
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
@@ -710,6 +711,7 @@ void __attribute__((__naked__)) PendSV_Handler() {
 		/* This PendSV call was made from a task using the MSP. Don't do
 		anything, stack does not have to be saved since we will never context
 		switch to a task using MSP, only PSP. */
+        scheduler.is_running = true;
     }
 
 	/* 3. Call context switch function, changes current TCB */

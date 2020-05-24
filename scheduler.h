@@ -170,6 +170,11 @@ struct sched {
      * WFI instruction to enter light Sleep mode.
      */
     sched_task sleep_task;
+
+    /**
+     * @brief Set to true once sched_start() is called.
+     */
+    bool is_running;
 };
 
 /**************************** Utilities ***************************************/
