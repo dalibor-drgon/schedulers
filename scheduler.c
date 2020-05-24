@@ -377,14 +377,15 @@ static void sched_movetask() {
 /**************************** Task privileged functions ***********************/
 // Can be run only at initialization phase or from syscall
 
-static void sched_taskp_reinit(sched_task *task) {
-    task->sp = task->sp_end - sizeof(sched_stack);
+static void sched_taskp_reinit(sched_task *task, sched_entry_function entry_function,
+        void *function_data, void *sp_end) {
+    task->sp = (char*) sp_end - sizeof(sched_stack);
 
     sched_stack *stack = (sched_stack *) task->sp;
     stack->psr = 0x21000000;
-    stack->pc = task->entry_function;
+    stack->pc = entry_function;
     stack->lr = sched_task_delete;
-    stack->r0 = (uint32_t) task->function_data;
+    stack->r0 = (uint32_t) function_data;
 }
 
 /**************************** Task built-in syscalls **************************/
@@ -555,10 +556,8 @@ void sched_task_init(sched_task *task, uint8_t priority,
         sched_entry_function function, void *data
 ) {
     task->priority = priority;
-    task->sp_end = sp + sp_length;
-    task->entry_function = function;
-    task->function_data = data;
-    sched_taskp_reinit(task);
+    task->state = SCHEDSTATE_DEAD;
+    sched_taskp_reinit(task, function, data, sp + sp_length);
 
     task->awaiting_mutex = NULL;
     // task->locked_mutexes.first = task->locked_mutexes.last = NULL;

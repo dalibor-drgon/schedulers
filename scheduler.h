@@ -122,7 +122,7 @@ struct sched_task {
     /// Tasks waiting for mutex to be released
     sched_list dependant_tasks;
 
-    void *sp_end, *volatile sp;
+    void *volatile sp;
     sched_task_state state;
     sched_task_list_type list_type;
     uint8_t priority;
@@ -133,9 +133,6 @@ struct sched_task {
     /// scheduler.realtime_tasks_waiting list, this is used as deadline for when
     /// the task should be resumed.
     uint32_t next_execution;
-
-    sched_entry_function entry_function;
-    void *function_data;
 };
 
 struct sched {
