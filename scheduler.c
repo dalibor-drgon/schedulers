@@ -191,7 +191,10 @@ void sched_init() {
     scheduler.cur_task = &scheduler.sleep_task;
     scheduler.sleep_task.state = SCHEDSTATE_READY;
     scheduler.is_running = false;
+
+    scheduler.sleep_task.task_list_next = NULL;
     sched_task_init(&scheduler.sleep_task, 0, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
+    scheduler.task_list_first = &scheduler.sleep_task;
 
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
 
@@ -389,6 +392,19 @@ static void sched_taskp_reinit(sched_task *task) {
 static bool sched_task_delete_syscall(void *data, sched_task *cur_task) {
     (void) data;
     cur_task->state = SCHEDSTATE_DEAD;
+
+    // Remove the task from list O(n)
+    sched_task *prev = NULL;
+    sched_task *cur = scheduler.task_list_first;
+    while(cur != NULL) {
+        if(cur == cur_task) break;
+        prev = cur;
+        cur = cur->task_list_next;
+    }
+    sched_expect(cur != NULL);
+    prev->task_list_next = cur_task->task_list_next;
+    cur_task->task_list_next = NULL;
+
     return false;
 }
 
@@ -396,6 +412,17 @@ static bool sched_task_sleepuntil_syscall(void *data, sched_task *cur_task) {
     uint32_t goal = (uint32_t) data;
     cur_task->next_execution = goal;
     list_insert(&scheduler.realtime_tasks_waiting, cur_task, list_rtw_islower);
+    return false;
+}
+
+static bool sched_task_add_syscall(void *data, sched_task *cur_task) {
+    sched_task *task = (sched_task *) data;
+
+    sched_task *next = scheduler.task_list_first;
+    task->task_list_next = next;
+    scheduler.task_list_first = task;
+    list_insert(&scheduler.realtime_tasks, task, list_rt_islower);
+
     return false;
 }
 
@@ -540,7 +567,14 @@ void sched_task_init(sched_task *task, uint8_t priority,
 }
 
 void sched_task_add(sched_task *task) {
-    sched_task_enqueue(task);
+    if(scheduler.is_running) {
+        sched_syscall(sched_task_add_syscall, task);
+    } else {
+        sched_task *next = scheduler.task_list_first;
+        task->task_list_next = next;
+        scheduler.task_list_first = task;
+        sched_task_enqueue(task);
+    }
 }
 
 void sched_task_delete() {

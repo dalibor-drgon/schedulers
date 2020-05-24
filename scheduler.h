@@ -117,6 +117,8 @@ struct sched_task {
         } queue;
     };
 
+    sched_task *task_list_next;
+
     /// Tasks waiting for mutex to be released
     sched_list dependant_tasks;
 
@@ -142,6 +144,11 @@ struct sched {
      * executed.
      */
     sched_task *cur_task;
+
+    /**
+     * @brief First registered task.
+     */
+    sched_task *task_list_first;
 
     /**
      * @brief Tasks using realtime (RMS or EDF) scheduler. This linked list is
