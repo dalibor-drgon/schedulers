@@ -73,11 +73,11 @@ struct sched_mutex {
 };
 
 typedef struct sched_list {
-    sched_task *first, *last;
+    sched_task *volatile first, *volatile last;
 } sched_list;
 
 typedef struct sched_queue {
-    sched_task *first, *last;
+    sched_task *volatile first, *volatile last;
 } sched_queue;
 
 struct sched_cond {
@@ -110,24 +110,24 @@ typedef enum sched_task_list_type {
 struct sched_task {
     union {
         struct {
-            sched_task *prev, *next;
+            sched_task *volatile prev, *volatile next;
         } list;
         struct {
-            sched_task *next;
+            sched_task *volatile next;
         } queue;
     };
 
-    sched_task *task_list_next;
+    sched_task *volatile task_list_next;
 
     /// Tasks waiting for mutex to be released
     sched_list dependant_tasks;
 
-    void *sp_end, *sp;
+    void *sp_end, *volatile sp;
     sched_task_state state;
     sched_task_list_type list_type;
     uint8_t priority;
     uint8_t _pad0;
-    sched_mutex *awaiting_mutex;
+    sched_mutex *volatile awaiting_mutex;
 
     /// If list_type == SCHEDLISTTYPE_WAITING or if this task is in
     /// scheduler.realtime_tasks_waiting list, this is used as deadline for when
@@ -148,7 +148,7 @@ struct sched {
     /**
      * @brief First registered task.
      */
-    sched_task *task_list_first;
+    sched_task *volatile task_list_first;
 
     /**
      * @brief Tasks using realtime (RMS or EDF) scheduler. This linked list is
