@@ -228,23 +228,9 @@ void sched_task_sleepuntil(uint32_t ticks);
 
 void sched_task_sleep(uint32_t ticks);
 
-/**
- * @brief For use in realtime tasks. Use this to signal the end of the task
- * until the next execution time happens.
- * 
- * NOTE: You can either return from the task or use this function, it's up to
- * the user's liking.
- */
-void sched_task_tick();
-
 static inline sched_task *sched_task_current() {
     return scheduler.cur_task;
 }
-
-/**************************** Task privileged functions ***********************/
-// Can be called from syscall
-
-void sched_taskp_tick(sched_task *task);
 
 
 /**************************** Mutex functions *********************************/
