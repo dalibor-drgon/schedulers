@@ -206,6 +206,10 @@ extern void sched_expect_fail(char *file, int lineno);
 #define sched_expect(expression)
 #endif
 
+#define sched_trigger_pendsv()      \
+	SCB_ICSR |= SCB_ICSR_PENDSVSET;
+
+
 /**************************** Scheduler ***************************************/
 
 void sched_init();

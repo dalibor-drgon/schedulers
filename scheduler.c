@@ -166,9 +166,6 @@ static void nvic_enable_irq_tim(uint32_t TIM) {
     }
 }
 
-#define sched_trigger_pendsv()      \
-	SCB_ICSR |= SCB_ICSR_PENDSVSET;
-
 
 /**************************** Main task ***************************************/
 
