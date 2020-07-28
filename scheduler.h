@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "scheduler-config.h"
 
 #ifdef __cplusplus
@@ -12,8 +13,8 @@ extern "C" {
 #endif
 
 
-#define SCHED_MUTEX_INIT {0}
-#define SCHED_COND_INIT {{(sched_task *) 0, (sched_task *) 0}}
+#define SCHED_MUTEX_INIT {NULL, NULL}
+#define SCHED_COND_INIT {{(sched_task *) NULL, (sched_task *) NULL}}
 
 /// Task structure
 struct sched_task;
@@ -67,8 +68,10 @@ struct sched_stack {
 extern sched scheduler;
 
 struct sched_mutex {
-    /// This is filled with pointer to the currently executed task
-    uint32_t value;
+    /// Task which locked the mutex and currently owns it
+    sched_task *owner;
+    /// Last task that was added to the waiting-to-lock queue
+    sched_task *last_to_lock;
     // sched_mutex *prev, *next;
 };
 

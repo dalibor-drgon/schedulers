@@ -426,14 +426,17 @@ static bool sched_task_add_syscall(void *data, sched_task *cur_task) {
 
 static bool sched_mutex_lock_syscall(void *data, sched_task *cur_task) {
     sched_mutex *mutex = (sched_mutex *) data;
-    sched_task *locked_task = (sched_task *) mutex->value;
+    sched_task *locked_task = mutex->last_to_lock;
     if(locked_task == NULL) {
-        mutex->value = (uint32_t) cur_task;
+        mutex->last_to_lock = cur_task;
+        mutex->owner = cur_task;
         // mutex_list_append(&cur_task->locked_mutexes, mutex);
         return true;
     }
 
-    mutex->value = (uint32_t) cur_task;
+    mutex->last_to_lock = cur_task;
+    // mutex->owner is already set to the first mutex that called
+    // sched_mutex_lock function.
     cur_task->awaiting_mutex = mutex;
     list_append(&locked_task->dependant_tasks, cur_task);
 
@@ -442,16 +445,14 @@ static bool sched_mutex_lock_syscall(void *data, sched_task *cur_task) {
 
 static bool sched_mutex_unlock_syscall(void *data, sched_task *task) {
     sched_mutex *mutex = (sched_mutex *) data;
+    task = mutex->owner;
 
     sched_task *resumed_task = list_find_for_mutex(&task->dependant_tasks, mutex);
-
     sched_expect(resumed_task != NULL);
-
+    mutex->owner = resumed_task;
     list_unlink(&task->dependant_tasks, resumed_task);
 
-    // queue_enqueue(&scheduler.fired_tasks, resumed_task);
     list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
-    // queue_enqueue(&scheduler.fired_tasks, task);
     list_insert(&scheduler.realtime_tasks, task, list_rt_islower);
 
     return false;
@@ -472,15 +473,17 @@ static bool sched_cond_wait_syscall(void *data, sched_task *cur_task) {
     list_append(&cond->tasks, cur_task);
     sched_irq_restore(primask);
 
-    uint32_t cur_value = mutex->value;
-    uint32_t expected_value = (uint32_t) cur_task;
+    sched_task * cur_value = mutex->last_to_lock;
+    sched_task * expected_value = cur_task;
     if(cur_value == expected_value) {
         // Just change the variable
-        mutex->value = 0;
+        mutex->last_to_lock = NULL;
+        mutex->owner = NULL;
     } else {
         // Unlock dependant task
         sched_task *resumed_task = list_find_for_mutex(&cur_task->dependant_tasks, mutex);
         sched_expect(resumed_task != NULL);
+        mutex->owner = resumed_task;
         list_unlink(&cur_task->dependant_tasks, resumed_task);
 
         list_insert(&scheduler.realtime_tasks, resumed_task, list_rt_islower);
@@ -606,12 +609,12 @@ void sched_task_sleep(uint32_t ticks) {
 /**************************** Mutex functions *********************************/
 
 void sched_mutex_lock(sched_mutex *mutex) {
-    uint32_t new_mutex_value = (uint32_t) scheduler.cur_task;
+    sched_task * new_mutex_value = scheduler.cur_task;
     uint32_t irq = sched_irq_disable();
-    uint32_t prev_value = mutex->value;
-    if(prev_value == 0) {
-        mutex->value = new_mutex_value;
-        // mutex_list_append(&scheduler.cur_task->locked_mutexes, mutex);
+    sched_task * prev_value = mutex->last_to_lock;
+    if(prev_value == NULL) {
+        mutex->last_to_lock = new_mutex_value;
+        mutex->owner = new_mutex_value;
         sched_irq_restore(irq);
     } else {
         sched_irq_restore(irq);
@@ -620,12 +623,12 @@ void sched_mutex_lock(sched_mutex *mutex) {
 }
 
 bool sched_mutex_trylock(sched_mutex *mutex) {
-    uint32_t new_mutex_value = (uint32_t) scheduler.cur_task;
+    sched_task * new_mutex_value = scheduler.cur_task;
     uint32_t irq = sched_irq_disable();
-    uint32_t prev_value = mutex->value;
-    if(prev_value == 0) {
-        mutex->value = new_mutex_value;
-        // mutex_list_append(&scheduler.cur_task->locked_mutexes, mutex);
+    sched_task * prev_value = mutex->last_to_lock;
+    if(prev_value == NULL) {
+        mutex->last_to_lock = new_mutex_value;
+        mutex->owner = new_mutex_value;
         sched_irq_restore(irq);
         return true;
     } else {
@@ -635,12 +638,12 @@ bool sched_mutex_trylock(sched_mutex *mutex) {
 }
 
 void sched_mutex_unlock(sched_mutex *mutex) {
-    uint32_t expected_value = (uint32_t) scheduler.cur_task;
+    sched_task * expected_value = mutex->owner;
     uint32_t irq = sched_irq_disable();
-    uint32_t cur_val = mutex->value;
+    sched_task * cur_val = mutex->last_to_lock;
     if(cur_val == expected_value) {
-        mutex->value = 0;
-        // mutex_list_unlink(&scheduler.cur_task->locked_mutexes, mutex);
+        mutex->last_to_lock = NULL;
+        mutex->owner = NULL;
         sched_irq_restore(irq);
     } else {
         sched_irq_restore(irq);
