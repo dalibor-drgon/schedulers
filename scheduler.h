@@ -69,10 +69,9 @@ extern sched scheduler;
 
 struct sched_mutex {
     /// Task which locked the mutex and currently owns it
-    sched_task *owner;
+    sched_task *volatile owner;
     /// Last task that was added to the waiting-to-lock queue
-    sched_task *last_to_lock;
-    // sched_mutex *prev, *next;
+    sched_task *volatile last_to_lock;
 };
 
 typedef struct sched_list {
@@ -196,6 +195,17 @@ static inline uint32_t sched_irq_disable() {
 static inline void sched_irq_restore(uint32_t primask) {
     __asm__ volatile("MSR primask, %0" :: "r" (primask));
 }
+
+// static inline uint32_t sched_ctxs_disable() {
+//     uint32_t basepri;
+//     __asm__ volatile ("MRS %0, basepri_max\n\t"
+//                       "MSR basepri, %1" : "=r" (basepri) : "r" (0x3) );
+//     return basepri;
+// }
+
+// static inline void sched_ctxs_restore(uint32_t basepri) {
+//     __asm__ volatile("MSR basepri, %0" :: "r" (basepri));
+// }
 
 uint32_t sched_ticks();
 
