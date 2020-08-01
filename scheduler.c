@@ -689,6 +689,10 @@ void SCHED_TIMhi_IRQHandler() {
 
 /**************************** PendSV handler **********************************/
 
+// This can't get inlined, because it uses many registers and so the registers
+// are pushed onto the stack - something that can't be done in naked function
+// that calls this function.
+__attribute__((__noinline__))
 static sched_task *sched_handle_syscall() {
     // sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
     // sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
