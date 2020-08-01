@@ -7,7 +7,7 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/scb.h>
 
-sched scheduler;
+sched scheduler = {0};
 
 /**************************** List functions **********************************/
 
