@@ -172,10 +172,17 @@ static void nvic_enable_irq_tim(uint32_t TIM) {
 static uint8_t sleep_task_sp[128];
 
 void sleep_task_entry(void *ign) {
-    // Just keep entering sleep mode and wait for TIMer interrupt to wake up
+    #ifdef SCHED_DEBUG
+    while(1) {
+        // Keep syncing to save power
+        asm volatile("ISB");
+    }
+    #else
+    // Just keep entering sleep mode and wait for TIMer interrupt to wake us up
     while(1) {
         asm volatile("WFI");
     }
+    #endif
 }
 
 /**************************** Scheduler functions *****************************/

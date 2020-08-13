@@ -38,4 +38,8 @@
 #define SCHED_CPU_MHZ 72
 #endif
 
+// Uncomment this definition to use ISB instruction instead of WFI when saving
+// power.
+// #define SCHED_DEBUG
+
 #endif
