@@ -258,6 +258,7 @@ void sched_task_delete();
 
 void sched_task_enqueue(sched_task *task);
 
+void sched_task_set_exit_code(sched_task *task, int return_value);
 void sched_task_fire(sched_task *task, int return_value);
 
 void sched_task_sleepuntil(uint32_t ticks);

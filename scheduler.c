@@ -581,6 +581,12 @@ void sched_task_enqueue(sched_task *task) {
     queue_enqueue(&scheduler.fired_tasks, task);
 }
 
+void sched_task_set_exit_code(sched_task *task, int return_value) {
+    // Set return value
+    sched_stack *stack = (sched_stack *) task->sp;
+    stack->r0 = return_value;
+}
+
 void sched_task_fire(sched_task *task, int return_value) {
     // Set return value
     sched_stack *stack = (sched_stack *) task->sp;
