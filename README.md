@@ -1,14 +1,13 @@
 
-This is simple real-time only scheduler targetting ARM Cortex M3 implemented
-using PendSV exceptions and TIMers with the support for system calls and
-synchronization.
+This is simple scheduler targetting ARM Cortex M3 implemented
+using PendSV exceptions, SVC instructions and TIMers with the support for system 
+calls and synchronization.
 Internally uses bubble sort with double-linked lists for maximum
 performance (for small ~8 and very small ~2 number of tasks this outperforms
 heap and is also a bit simpler both for usage and implementation-wise and does
 not require allocation of any arrays or other structures except of tasks themselves).
-The user can choose between EDF (earliest deadline first scheduling) or
-RMS (rate monotomic scheduling). Tasks with greater priority will pre-empt
-already running tasks, so mutexes should be used for synchronization.
+Tasks with greater priority will pre-empt already running tasks, so mutexes 
+should be used for synchronization.
 
 # Usage
 
@@ -55,20 +54,26 @@ The full example code may look like this:
 // Scheduler
 sched_task task1;
 sched_task task2;
+sched_mutex mutex = SCHED_MUTEX_INIT;
 
 uint8_t __attribute__((aligned(8))) stack1[256];
 uint8_t __attribute__((aligned(8))) stack2[256];
 
 void enter1(void *arg) {
-    uart_print("A");
-    // by returning you automatically call sched_task_tick();
+    while(1) {
+        sched_mutex_lock(&mutex);
+        uart_print("A");
+        sched_mutex_unlock(&mutex);
+        sched_task_sleep(1e3);
+    }
 }
 
 void enter2(void *arg) {
     while(1) {
+        sched_mutex_lock(&mutex);
         uart_print("B");
-        // or you can call the sched_task_tick() from inside the program
-        sched_task_tick();
+        sched_mutex_unlock(&mutex);
+        sched_task_sleep(1e3);
     }
 }
 
@@ -113,7 +118,9 @@ for task interval to be up to 17 minutes long.
 
 ## System calls
 
-To perform a system call, call `sched_syscall()`:
+Each system call consists of SVC instruction and up to 3 MOV instructions, which
+makes using system calls at least slightly FLASH efficient. To 
+perform a system call, call `sched_syscall()`:
 
 ```c
 int sched_syscall(
@@ -131,9 +138,11 @@ typedef bool (*sched_syscall_function)(void *data, sched_task *task);
 
 and must return `true` if the system call was non-blocking, otherwise if it was
 blocking it must return `false` and later, once it finishes, call
-`sched_task_fire()` with given task and return value.
+`sched_task_fire()` with given task and return value. When `true` is returned, 
+no exit code is set (you can set it manually with `sched_task_set_exit_code()`).
 
 ```c
+void sched_task_set_exit_code(sched_task *task, int return_value);
 void sched_task_fire(sched_task *task, int return_value);
 ```
 
