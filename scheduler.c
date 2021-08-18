@@ -230,45 +230,25 @@ void sched_init() {
     }
     TIM_SMCR(SCHED_TIMhi) |= TIM_SMCR_SMS_ECM1;
 
-    // Finally enable those timers
+    // Enable timers
     timer_enable_counter(SCHED_TIMhi);
     timer_enable_counter(SCHED_TIMlo);
 
-    nvic_enable_irq_tim(SCHED_TIMhi);
-    nvic_enable_irq_tim(SCHED_TIMlo);
 }
 
 void uart_print(char *c);
 
 void sched_start() {
+    // Enable interrupts from timers
+    nvic_enable_irq_tim(SCHED_TIMhi);
+    nvic_enable_irq_tim(SCHED_TIMlo);
+
     sched_syscall(NULL, NULL);
 }
 
 void sched_apply() {
     sched_syscall(NULL, NULL);
 }
-
-static sched_syscall_function pendsv_syscall_function;
-static void * pendsv_syscall_data;
-
-int __attribute__((noinline)) sched_syscall(
-    sched_syscall_function syscall_function,
-    void *data)
-{
-    uint32_t irq = sched_irq_disable();
-    pendsv_syscall_function = syscall_function;
-    pendsv_syscall_data = data;
-    sched_irq_restore(irq);
-
-	/* Trigger PendSV, causing PendSV_Handler to be called immediately */
-    sched_trigger_pendsv();
-	__asm__ volatile("nop");
-	__asm__ volatile("nop");
-	__asm__ volatile("nop");
-	__asm__ volatile("nop");
-    
-}// Return value will be set by given syscall, do not worry about the warning. 
-// Tested with gcc, may require modification with other compilers.
 
 
 /**************************** Static scheduler functions **********************/
@@ -696,17 +676,14 @@ void SCHED_TIMhi_IRQHandler() {
 
 /**************************** PendSV handler **********************************/
 
-// This can't get inlined, because it uses many registers and so the registers
-// are pushed onto the stack - something that can't be done in naked function
-// that calls this function.
+// This can't get inlined, because it uses many registers which results in some
+// variables being pushed onto the stack - something that can't be done in naked 
+// function which calls this function.
 __attribute__((__noinline__))
-static sched_task *sched_handle_syscall() {
-    // sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
-    // sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
-    // void * data = (void *) stack->r1;
-    sched_syscall_function syscall_func = pendsv_syscall_function;
-    pendsv_syscall_function = NULL;
-    void * data = pendsv_syscall_data;
+static sched_task *sched_handle_syscall_svc() {
+    sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
+    sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
+    void * data = (void *) stack->r1;
     if(syscall_func != NULL) {
         sched_task *cur_task = scheduler.cur_task;
         cur_task->state = SCHEDSTATE_BLOCKING;
@@ -717,6 +694,70 @@ static sched_task *sched_handle_syscall() {
         }
     }
     return sched_nexttask();
+}
+
+// This can't get inlined, because it uses many registers which results in some
+// variables being pushed onto the stack - something that can't be done in naked 
+// function which calls this function.
+__attribute__((__noinline__))
+static sched_task *sched_handle_syscall_pendsv() {
+    return sched_nexttask();
+}
+
+
+void __attribute__((__naked__)) SVC_Handler() {
+
+	/* 0. NVIC has already pushed some registers on the program/main stack.
+	 * We are free to modify R0..R3 and R12 without saving them again, and
+	 * additionally the compiler may choose to use R4..R11 in this function.
+	 * If it does so, the naked attribute will prevent it from saving those
+	 * registers on the stack, so we'll just have to hope that it doesn't do
+	 * anything with them before our stm or after our ldm instructions.
+	 * Luckily, we don't ever intend to return to the original caller on the
+	 * main stack, so this question is moot. */
+
+	/* Read the link register */
+	uint32_t lr;
+	__asm__("MOV %0, lr" : "=r" (lr));
+
+	if (lr & 0x4) {
+		/* This PendSV call was made from a task using the PSP */
+
+		/* 1. Push all other registers (R4..R11) on the program stack */
+		void *psp;
+		__asm__(
+			/* Load PSP to a temporary register */
+			"MRS %0, psp\n"
+			/* Push context relative to the address in the temporary
+			 * register, update register with resulting address */
+			"STMDB %0!, {r4-r11}\n"
+			/* Put back the new stack pointer in PSP (pointless) */
+			"MSR psp, %0\n"
+			: "=r" (psp));
+
+		/* 2. Store that PSP in the current TCB */
+	    scheduler.cur_task->sp = psp;
+	} else {
+		/* This PendSV call was made from a task using the MSP. Don't do
+		anything, stack does not have to be saved since we will never context
+		switch to a task using MSP, only PSP. */
+        scheduler.is_running = true;
+    }
+
+	/* 3. Call context switch function, changes current TCB */
+    sched_task *task = sched_handle_syscall_svc();
+
+    /* 4. Load PSP from TCB */
+    void *psp = task->sp;
+    /* 5. Pop R4..R11 from the program stack */
+    __asm__(
+        "LDMIA %0!, {r4-r11}\n"
+        "MSR psp, %0\n"
+        :: "r" (psp));
+
+    // Finally, return. NVIC will pop registers from stack we set up and jump
+    // where PC points to.
+    __asm__("bx %0" :: "r"(0xfffffffd));
 }
 
 void __attribute__((__naked__)) PendSV_Handler() {
@@ -759,7 +800,7 @@ void __attribute__((__naked__)) PendSV_Handler() {
     }
 
 	/* 3. Call context switch function, changes current TCB */
-    sched_task *task = sched_handle_syscall();
+    sched_task *task = sched_handle_syscall_pendsv();
 
     /* 4. Load PSP from TCB */
     void *psp = task->sp;
@@ -773,3 +814,6 @@ void __attribute__((__naked__)) PendSV_Handler() {
     // where PC points to.
     __asm__("bx %0" :: "r"(0xfffffffd));
 }
+
+
+

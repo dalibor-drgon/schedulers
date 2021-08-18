@@ -223,6 +223,7 @@ extern void sched_expect_fail(char *file, int lineno);
 	SCB_ICSR |= SCB_ICSR_PENDSVSET;
 
 
+
 /**************************** Scheduler ***************************************/
 
 void sched_init();
@@ -231,9 +232,18 @@ void sched_start();
 
 void sched_apply();
 
-int sched_syscall(
-    sched_syscall_function syscall_function,
-    void *data);
+static inline int sched_syscall(
+        sched_syscall_function syscall_function,
+        void *data) {
+    int ret;
+    asm volatile 
+        ("mov R0, %1\n\t"
+         "mov R1, %2\n\t"
+         "svc 0\n\t"
+         "mov %0, R0" : "=r" (ret) : "r" (syscall_function), "r" (data));
+    return ret;
+}
+
 
 /**************************** Task functions **********************************/
 
