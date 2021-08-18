@@ -133,7 +133,7 @@ uint32_t sched_ticks() {
   do {
     cnt_hi = TIM_CNT(SCHED_TIMhi);
     cnt_lo = TIM_CNT(SCHED_TIMlo);
-  } while(cnt_lo != TIM_CNT(SCHED_TIMlo) || cnt_hi != TIM_CNT(SCHED_TIMhi));
+  } while((cnt_lo >> 31) != (TIM_CNT(SCHED_TIMlo) >> 31) || cnt_hi != TIM_CNT(SCHED_TIMhi));
   return ((uint32_t) cnt_hi << 16) | cnt_lo;
 }
 
