@@ -433,6 +433,10 @@ static bool sched_mutex_lock_syscall(void *data, sched_task *cur_task) {
 static bool sched_mutex_unlock_syscall(void *data, sched_task *task) {
     sched_mutex *mutex = (sched_mutex *) data;
     task = mutex->owner;
+    if(task == NULL) {
+        // Not locked, return
+        return false;
+    }
 
     sched_task *resumed_task = list_find_for_mutex(&task->dependant_tasks, mutex);
     sched_expect(resumed_task != NULL);
