@@ -644,7 +644,7 @@ void sched_mutex_unlock(sched_mutex *mutex) {
         mutex->last_to_lock = NULL;
         mutex->owner = NULL;
         sched_irq_restore(irq);
-    } else {
+    } else if(cur_val != NULL) {
         sched_irq_restore(irq);
         sched_syscall(sched_mutex_unlock_syscall, mutex);
     }
