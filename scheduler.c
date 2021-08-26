@@ -128,12 +128,14 @@ static bool list_rtw_islower(sched_task *one, sched_task *two) {
 /**************************** Utilities ***************************************/
 
 uint32_t sched_ticks() {
-  uint16_t cnt_lo;
-  uint16_t cnt_hi;
+  uint16_t cnt_lo, cnt2_lo = TIM_CNT(SCHED_TIMlo);
+  uint16_t cnt_hi, cnt2_hi = TIM_CNT(SCHED_TIMhi);
   do {
-    cnt_hi = TIM_CNT(SCHED_TIMhi);
-    cnt_lo = TIM_CNT(SCHED_TIMlo);
-  } while((cnt_lo >> 31) != (TIM_CNT(SCHED_TIMlo) >> 31) || cnt_hi != TIM_CNT(SCHED_TIMhi));
+    cnt_hi = cnt2_hi;
+    cnt_lo = cnt2_lo;
+    cnt2_hi = TIM_CNT(SCHED_TIMhi);
+    cnt2_lo = TIM_CNT(SCHED_TIMlo);
+  } while((cnt_lo >> 15) != (cnt2_lo >> 15) || cnt_hi != cnt2_hi);
   return ((uint32_t) cnt_hi << 16) | cnt_lo;
 }
 
@@ -283,8 +285,8 @@ static bool sched_setup(uint32_t goal_time) {
     do {
         time = sched_ticks();
         rem = goal_time - time;
-    } while((rem > 0xffff && rem <= 0x10002)
-         || (rem > 0      && rem <= 2));
+    } while((rem > 0xffff && rem <= 0x10001)
+         || (rem > 0      && rem <= 1));
     if(rem <= 0) {
         sched_irq_restore(primask);
         return true;
