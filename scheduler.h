@@ -185,7 +185,7 @@ struct sched {
 
 /**************************** Utilities ***************************************/
 
-static inline uint32_t sched_irq_disable() {
+static inline uint32_t sched_irq_disable(void) {
     uint32_t primask;
     __asm__ volatile ("MRS %0, primask\n\t"
                       "CPSID i" : "=r" (primask) );
@@ -207,7 +207,7 @@ static inline void sched_irq_restore(uint32_t primask) {
 //     __asm__ volatile("MSR basepri, %0" :: "r" (basepri));
 // }
 
-uint32_t sched_ticks();
+uint32_t sched_ticks(void);
 
 #ifdef DEBUG
 #define sched_expect(expression) do {                                          \
@@ -226,11 +226,11 @@ extern void sched_expect_fail(char *file, int lineno);
 
 /**************************** Scheduler ***************************************/
 
-void sched_init();
+void sched_init(void);
 
-void sched_start();
+void sched_start(void);
 
-void sched_apply();
+void sched_apply(void);
 
 static inline int sched_syscall(
         sched_syscall_function syscall_function,
@@ -255,7 +255,7 @@ void sched_task_init(sched_task *task, uint8_t priority,
 
 void sched_task_add(sched_task *task);
 
-void sched_task_delete();
+void sched_task_delete(void);
 
 void sched_task_enqueue(sched_task *task);
 
@@ -266,7 +266,7 @@ void sched_task_sleepuntil(uint32_t ticks);
 
 void sched_task_sleep(uint32_t ticks);
 
-static inline sched_task *sched_task_current() {
+static inline sched_task *sched_task_current(void) {
     return scheduler.cur_task;
 }
 

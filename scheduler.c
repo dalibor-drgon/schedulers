@@ -127,7 +127,7 @@ static bool list_rtw_islower(sched_task *one, sched_task *two) {
 
 /**************************** Utilities ***************************************/
 
-uint32_t sched_ticks() {
+uint32_t sched_ticks(void) {
   uint16_t cnt_lo, cnt2_lo = TIM_CNT(SCHED_TIMlo);
   uint16_t cnt_hi, cnt2_hi = TIM_CNT(SCHED_TIMhi);
   do {
@@ -190,7 +190,7 @@ void sleep_task_entry(void *ign) {
 /**************************** Scheduler functions *****************************/
 
 
-void sched_init() {
+void sched_init(void) {
     /** Init scheduler **/
     scheduler.realtime_tasks.first = scheduler.realtime_tasks.last = NULL;
     scheduler.fired_tasks.first = scheduler.fired_tasks.last = NULL;
@@ -240,7 +240,7 @@ void sched_init() {
 
 void uart_print(char *c);
 
-void sched_start() {
+void sched_start(void) {
     // Enable interrupts from timers
     nvic_enable_irq_tim(SCHED_TIMhi);
     nvic_enable_irq_tim(SCHED_TIMlo);
@@ -248,7 +248,7 @@ void sched_start() {
     sched_syscall(NULL, NULL);
 }
 
-void sched_apply() {
+void sched_apply(void) {
     sched_syscall(NULL, NULL);
 }
 
@@ -302,14 +302,14 @@ static bool sched_setup(uint32_t goal_time) {
     return false;
 }
 
-static void sched_unsetup() {
+static void sched_unsetup(void) {
     // Disable TIMlo.CC1 interrupt
     TIM_DIER(SCHED_TIMlo) &= ~TIM_DIER_CC1IE;
     // Disable TIMhi.CC1 interrupt
     TIM_DIER(SCHED_TIMhi) &= ~TIM_DIER_CC1IE;
 }
 
-static sched_task *sched_nexttask() {
+static sched_task *sched_nexttask(void) {
     do {
         // Add fired tasks from queue into realtime_tasks or
         // realtime_tasks_waiting list 
@@ -355,7 +355,7 @@ static sched_task *sched_nexttask() {
     return scheduler.cur_task = &scheduler.sleep_task;
 }
 
-static void sched_movetask() {
+static void sched_movetask(void) {
     list_unlink(&scheduler.realtime_tasks, scheduler.cur_task);
 }
 
@@ -569,7 +569,7 @@ void sched_task_add(sched_task *task) {
     }
 }
 
-void sched_task_delete() {
+void sched_task_delete(void) {
     sched_syscall(sched_task_delete_syscall, NULL);
 }
 
@@ -671,11 +671,11 @@ void sched_cond_broadcast(sched_cond *cond) {
 
 /**************************** Timer handlers **********************************/
 
-void SCHED_TIMlo_IRQHandler() {
+void SCHED_TIMlo_IRQHandler(void) {
     sched_trigger_pendsv();
 }
 
-void SCHED_TIMhi_IRQHandler() {
+void SCHED_TIMhi_IRQHandler(void) {
     if(scheduler.realtime_tasks_waiting.first == NULL) {
         sched_unsetup();
     } else {
@@ -692,7 +692,7 @@ void SCHED_TIMhi_IRQHandler() {
 // variables being pushed onto the stack - something that can't be done in naked 
 // function which calls this function.
 __attribute__((__noinline__))
-static sched_task *sched_handle_syscall_svc() {
+static sched_task *sched_handle_syscall_svc(void) {
     sched_stack *stack = (sched_stack *) scheduler.cur_task->sp;
     sched_syscall_function syscall_func = (sched_syscall_function) stack->r0;
     void * data = (void *) stack->r1;
@@ -712,12 +712,12 @@ static sched_task *sched_handle_syscall_svc() {
 // variables being pushed onto the stack - something that can't be done in naked 
 // function which calls this function.
 __attribute__((__noinline__))
-static sched_task *sched_handle_syscall_pendsv() {
+static sched_task *sched_handle_syscall_pendsv(void) {
     return sched_nexttask();
 }
 
 
-void __attribute__((__naked__)) SVC_Handler() {
+void __attribute__((__naked__)) SVC_Handler(void) {
 
 	/* 0. NVIC has already pushed some registers on the program/main stack.
 	 * We are free to modify R0..R3 and R12 without saving them again, and
@@ -772,7 +772,7 @@ void __attribute__((__naked__)) SVC_Handler() {
     __asm__("bx %0" :: "r"(0xfffffffd));
 }
 
-void __attribute__((__naked__)) PendSV_Handler() {
+void __attribute__((__naked__)) PendSV_Handler(void) {
 
 	/* 0. NVIC has already pushed some registers on the program/main stack.
 	 * We are free to modify R0..R3 and R12 without saving them again, and
