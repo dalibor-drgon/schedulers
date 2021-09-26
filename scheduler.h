@@ -235,13 +235,14 @@ void sched_apply();
 static inline int sched_syscall(
         sched_syscall_function syscall_function,
         void *data) {
-    int ret;
+    register unsigned r0 asm ("r0") = (unsigned) syscall_function;
+    register unsigned r1 asm ("r1") = (unsigned) data;
     asm volatile 
-        ("mov R0, %1\n\t"
-         "mov R1, %2\n\t"
-         "svc 0\n\t"
-         "mov %0, R0" : "=r" (ret) : "r" (syscall_function), "r" (data));
-    return ret;
+        ("svc 0"
+        : "=r" (r0) : "r" (r0), "r" (r1)
+        : "memory", "cc");
+    (void) r1;
+    return (int) r0;
 }
 
 
