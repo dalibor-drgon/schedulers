@@ -123,6 +123,10 @@ struct sched_task {
 
     /// Tasks waiting for mutex to be released
     sched_list dependant_tasks;
+    
+    uint32_t sched_time;
+    const char *name;
+    uint64_t running_time;
 
     void *volatile sp;
     sched_task_state state;
@@ -245,10 +249,22 @@ static inline int sched_syscall(
     return (int) r0;
 }
 
+static inline int64_t sched_syscall64(
+        sched_syscall_function syscall_function,
+        void *data) {
+    register unsigned r0 asm ("r0") = (unsigned) syscall_function;
+    register unsigned r1 asm ("r1") = (unsigned) data;
+    asm volatile 
+        ("svc 0"
+        : "=r" (r0), "=r" (r1) : "r" (r0), "r" (r1)
+        : "memory", "cc");
+    return r0 | ((int64_t) r1 << 32);
+}
+
 
 /**************************** Task functions **********************************/
 
-void sched_task_init(sched_task *task, uint8_t priority,
+void sched_task_init(sched_task *task, const char *name, uint8_t priority,
         uint8_t *sp, unsigned sp_length,
         sched_entry_function function, void *data
 );
@@ -259,7 +275,20 @@ void sched_task_delete(void);
 
 void sched_task_enqueue(sched_task *task);
 
-void sched_task_set_exit_code(sched_task *task, int return_value);
+
+// Set return value
+static inline void sched_task_set_exit_code(sched_task *task, int return_value) {
+    sched_stack *stack = (sched_stack *) task->sp;
+    stack->r0 = return_value;
+}
+
+// Set return value
+static inline void sched_task_set_exit_code64(sched_task *task, int64_t return_value) {
+    sched_stack *stack = (sched_stack *) task->sp;
+    stack->r0 = return_value;
+    stack->r1 = return_value >> 32;
+}
+
 void sched_task_fire(sched_task *task, int return_value);
 
 void sched_task_sleepuntil(uint32_t ticks);
@@ -286,6 +315,9 @@ void sched_cond_broadcast(sched_cond *cond);
 void sched_cond_signal_fromisr(sched_cond *cond);
 void sched_cond_broadcast_fromisr(sched_cond *cond);
 
+/*************************** Monitoring functions *****************************/
+
+uint64_t sched_monit_getruntime(sched_task *task);
 
 #ifdef __cplusplus
 }

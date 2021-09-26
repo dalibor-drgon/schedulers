@@ -199,7 +199,7 @@ void sched_init(void) {
     scheduler.is_running = false;
 
     scheduler.sleep_task.task_list_next = NULL;
-    sched_task_init(&scheduler.sleep_task, 0, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
+    sched_task_init(&scheduler.sleep_task, "<SLEEP>", 0, sleep_task_sp, sizeof(sleep_task_sp), sleep_task_entry, NULL);
     scheduler.task_list_first = &scheduler.sleep_task;
 
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xff);
@@ -245,7 +245,8 @@ void sched_start(void) {
     nvic_enable_irq_tim(SCHED_TIMhi);
     nvic_enable_irq_tim(SCHED_TIMlo);
 
-    sched_syscall(NULL, NULL);
+    sched_trigger_pendsv();
+    asm volatile("nop\n\tnop\n\tnop");
 }
 
 void sched_apply(void) {
@@ -513,6 +514,17 @@ static bool sched_cond_broadcast_syscall(void *data, sched_task *cur_task) {
     return true;
 }
 
+static bool sched_monit_getruntime_syscall(void *data, sched_task *cur_task) {
+    sched_task *task = (sched_task*) data;
+    if(task == cur_task) {
+        uint32_t cur_time = sched_ticks();
+        task->running_time += cur_time - task->sched_time;
+        task->sched_time = cur_time;
+    }
+    sched_task_set_exit_code64(cur_task, task->running_time);
+    return true;
+}
+
 /**************************** Cond functions from ISR *************************/
 
 void sched_cond_signal_fromisr(sched_cond *cond) {
@@ -544,12 +556,13 @@ void sched_cond_broadcast_fromisr(sched_cond *cond) {
 /**************************** Task functions **********************************/
 
 
-void sched_task_init(sched_task *task, uint8_t priority,
+void sched_task_init(sched_task *task, const char *name, uint8_t priority,
         uint8_t *sp, unsigned sp_length,
         sched_entry_function function, void *data
 ) {
     task->priority = priority;
     task->state = SCHEDSTATE_DEAD;
+    task->name = name;
     sched_taskp_reinit(task, function, data, sp + sp_length);
 
     task->awaiting_mutex = NULL;
@@ -581,12 +594,6 @@ void sched_task_enqueue(sched_task *task) {
     // Finally enqueue it into fired tasks queue to be processed from PendSV
     // handler 
     queue_enqueue(&scheduler.fired_tasks, task);
-}
-
-void sched_task_set_exit_code(sched_task *task, int return_value) {
-    // Set return value
-    sched_stack *stack = (sched_stack *) task->sp;
-    stack->r0 = return_value;
 }
 
 void sched_task_fire(sched_task *task, int return_value) {
@@ -667,6 +674,11 @@ void sched_cond_signal(sched_cond *cond) {
 
 void sched_cond_broadcast(sched_cond *cond) {
     sched_syscall(sched_cond_broadcast_syscall, cond);
+}
+/*************************** Monitoring functions *****************************/
+
+uint64_t sched_monit_getruntime(sched_task *task) {
+    return sched_syscall64(sched_monit_getruntime_syscall, task);
 }
 
 /**************************** Timer handlers **********************************/
@@ -756,8 +768,15 @@ void __attribute__((__naked__)) SVC_Handler(void) {
         scheduler.is_running = true;
     }
 
+    sched_task *prev = scheduler.cur_task;
+
 	/* 3. Call context switch function, changes current TCB */
     sched_task *task = sched_handle_syscall_svc();
+
+    uint32_t cur_time = sched_ticks();
+    if(prev != NULL)
+        prev->running_time += cur_time - prev->sched_time;
+    task->sched_time = cur_time;
 
     /* 4. Load PSP from TCB */
     void *psp = task->sp;
@@ -811,8 +830,15 @@ void __attribute__((__naked__)) PendSV_Handler(void) {
         scheduler.is_running = true;
     }
 
+    sched_task *prev = scheduler.cur_task;
+
 	/* 3. Call context switch function, changes current TCB */
     sched_task *task = sched_handle_syscall_pendsv();
+
+    uint32_t cur_time = sched_ticks();
+    if(prev != NULL)
+        prev->running_time += cur_time - prev->sched_time;
+    task->sched_time = cur_time;
 
     /* 4. Load PSP from TCB */
     void *psp = task->sp;
